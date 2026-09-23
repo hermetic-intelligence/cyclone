@@ -10,7 +10,7 @@ The ZIP contains `session.json` for problem and session metadata, `events.jsonl`
 
 ## Try it
 
-Build and load the extension using [extension/README.md](extension/README.md). On a LeetCode problem, use **Alt+Shift+R** or the extension popup to start and stop. The red `REC` badge indicates an active session. Stopping prompts you to save a ZIP.
+Build and load the extension using [extension/README.md](extension/README.md). On a LeetCode problem, use **Alt+Shift+R** or the extension popup to start and stop. On first use, a full extension tab asks for lasting microphone access and closes before recording begins. The red `REC` badge indicates an active session. Stopping saves a ZIP under Chrome's `Downloads/Cyclone` folder.
 
 Process an export:
 
@@ -22,4 +22,4 @@ This produces `report.md` and `analysis.json`. For local batch transcription, in
 
 ## Current validation boundary
 
-The extension build and processor tests check the code and export contract. Reading the visible editor textarea was verified on a live, unauthenticated LeetCode Two Sum page. A complete recording with microphone permission and a logged-in Run/Submit flow still needs an actual Chrome trial. LeetCode can change its editor DOM, so the first real attempt is the intended integration check.
+The extension build and processor tests check the code and export contract. Reading the visible editor textarea was verified on a live, unauthenticated LeetCode Two Sum page. A real Chrome attempt produced a decodable WebM spanning the six-minute session, 77 code events, and a local transcript. Speech recognition made some mistakes, but the original audio remains in the export. The logged-in Run/Submit flow has not yet been exercised; that attempt did not use either button. LeetCode can change its editor DOM, so real attempts remain useful integration checks.

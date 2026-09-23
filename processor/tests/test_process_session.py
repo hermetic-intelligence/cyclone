@@ -4,7 +4,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from processor.process_session import compress_code_states, process
+from processor.process_session import compress_code_states, process, select_report_states
 
 
 class ProcessorTest(unittest.TestCase):
@@ -17,6 +17,19 @@ class ProcessorTest(unittest.TestCase):
             {"type": "code", "tMs": 5, "code": "a"},
         ]
         self.assertEqual([s["code"] for s in compress_code_states(events)], ["a", "b", "a"])
+
+    def test_report_keeps_initial_state_and_last_state_before_pauses(self):
+        states = [
+            {"tMs": 0, "code": "initial"},
+            {"tMs": 100, "code": "typing"},
+            {"tMs": 200, "code": "first pause"},
+            {"tMs": 5000, "code": "typing again"},
+            {"tMs": 5100, "code": "final"},
+        ]
+        self.assertEqual(
+            [s["code"] for s in select_report_states(states)],
+            ["initial", "first pause", "final"],
+        )
 
     def test_zip_processing_preserves_trace_and_writes_report_without_asr(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -40,6 +53,7 @@ class ProcessorTest(unittest.TestCase):
             result = json.loads((out / "analysis.json").read_text())
             self.assertEqual(len(result["events"]), 3)
             self.assertEqual(len(result["codeStates"]), 1)
+            self.assertEqual(len(result["reportCodeStates"]), 1)
             self.assertEqual(result["transcript"], [])
             report = (out / "report.md").read_text()
             self.assertIn("Two Sum", report)

@@ -80,6 +80,19 @@ def compress_code_states(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return states
 
 
+def select_report_states(states: list[dict[str, Any]], quiet_ms: int = 4000) -> list[dict[str, Any]]:
+    """Show the initial code and the last state before each editing pause."""
+    if not states:
+        return []
+    selected = [states[0]]
+    for index, state in enumerate(states[1:], 1):
+        next_time = states[index + 1]["tMs"] if index + 1 < len(states) else None
+        if next_time is None or next_time - state["tMs"] >= quiet_ms:
+            if state is not selected[-1]:
+                selected.append(state)
+    return selected
+
+
 def transcribe(audio: Path | None, model_name: str) -> tuple[list[dict[str, Any]], str | None]:
     if not audio or not audio.exists():
         return [], "No audio.webm was included."
@@ -162,6 +175,7 @@ def process(source: Path, output: Path, do_transcribe: bool = False, model: str 
         meta = read_json(metadata_path)
         events = read_events(events_path)
         states = compress_code_states(events)
+        report_states = select_report_states(states)
         audio = root / "audio.webm"
         if do_transcribe:
             speech, warning = transcribe(audio, model)
@@ -172,10 +186,11 @@ def process(source: Path, output: Path, do_transcribe: bool = False, model: str 
         ).hexdigest()
         output.mkdir(parents=True, exist_ok=True)
         structured = {"metadata": meta, "source": {"path": str(source), "sha256": digest},
-                      "events": events, "codeStates": states, "transcript": speech,
+                      "events": events, "codeStates": states, "reportCodeStates": report_states,
+                      "transcript": speech,
                       "transcriptionWarning": warning}
         (output / "analysis.json").write_text(json.dumps(structured, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        (output / "report.md").write_text(render_markdown(meta, events, states, speech, warning, digest), encoding="utf-8")
+        (output / "report.md").write_text(render_markdown(meta, events, report_states, speech, warning, digest), encoding="utf-8")
     return output
 
 

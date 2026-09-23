@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/background.ts src/content.ts src/offscreen.ts src/popup.ts --bundle --format=esm --target=chrome120 --outdir=dist --entry-names=[name] && cp manifest.json popup.html offscreen.html dist/",
+    "build": "esbuild src/background.ts src/content.ts src/offscreen.ts src/popup.ts src/permission.ts --bundle --format=esm --target=chrome120 --outdir=dist --entry-names=[name] && cp manifest.json popup.html offscreen.html permission.html dist/",
+    "smoke": "bun run build && node scripts/smoke.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",
     "esbuild": "^0.24.2",
+    "playwright": "^1.63.0",
     "typescript": "^5.7.2"
   }
 }

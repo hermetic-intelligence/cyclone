@@ -7,10 +7,17 @@ let stream: MediaStream | undefined;
 let stopping: Promise<{ ok: boolean; url?: string; error?: string }> | undefined;
 let dbPromise: Promise<IDBDatabase> | undefined;
 let persistQueue = Promise.resolve();
+let stopRequested = false;
+let microphoneTrackEnded = false;
+let lastAudioChunkAtMs = 0;
 
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   if (message.type === "offscreen-start") {
-    void start(message.metadata).then((started) => sendResponse({ ok: true, ...started })).catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
+    void start(message.metadata).then((started) => sendResponse({ ok: true, ...started })).catch((error: unknown) => sendResponse({
+      ok: false,
+      error: error && typeof error === "object" && "message" in error ? String(error.message) : String(error),
+      errorName: error && typeof error === "object" && "name" in error ? String(error.name) : "UnknownError"
+    }));
     return true;
   }
   if (message.type === "offscreen-event") {
@@ -43,18 +50,60 @@ async function start(metadata: SessionMetadata): Promise<{ startedAt: string; st
   const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find((type) => MediaRecorder.isTypeSupported(type));
   recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
   session = { metadata, events: [] };
+  stopRequested = false;
+  microphoneTrackEnded = false;
+  lastAudioChunkAtMs = 0;
+  for (const track of stream.getAudioTracks()) {
+    track.addEventListener("ended", () => { microphoneTrackEnded = true; });
+  }
+  recorder.addEventListener("stop", () => {
+    if (!stopRequested && session) {
+      const failedSessionId = session.metadata.sessionId;
+      const reason = microphoneTrackEnded
+        ? "The microphone stream ended before you stopped recording."
+        : "Chrome stopped the audio recorder before you stopped the session.";
+      stream?.getTracks().forEach((track) => track.stop());
+      session = undefined;
+      recorder = undefined;
+      stream = undefined;
+      void chrome.runtime.sendMessage({ type: "offscreen-failed", sessionId: failedSessionId, reason } satisfies Message);
+    }
+  });
   let chunkIndex = 0;
+  let firstChunk: (() => void) | undefined;
   recorder.addEventListener("dataavailable", (event) => {
     if (event.data.size && session) {
+      lastAudioChunkAtMs = Date.now();
       const current = session;
       const index = chunkIndex++;
       persistQueue = persistQueue.then(async () => {
         const db = await database();
         await request(db.transaction("chunks", "readwrite").objectStore("chunks").put({ id: `${current.metadata.sessionId}:${index}`, sessionId: current.metadata.sessionId, chunkIndex: index, blob: event.data }));
       });
+      firstChunk?.();
     }
   });
-  recorder.start(1000);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("The microphone produced no audio data within 6 seconds. Check Chrome and macOS microphone access.")), 6000);
+      firstChunk = () => { clearTimeout(timeout); resolve(); };
+      recorder!.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("Audio recording failed to start.")); }, { once: true });
+      recorder!.addEventListener("stop", () => { clearTimeout(timeout); reject(new Error("Audio recording stopped before it produced data.")); }, { once: true });
+      recorder!.start(1000);
+    });
+    await persistQueue;
+    if (!session || recorder?.state !== "recording") throw new Error("The microphone recorder stopped during startup.");
+  } catch (error) {
+    stopRequested = true;
+    if (recorder?.state !== "inactive") recorder?.stop();
+    stream?.getTracks().forEach((track) => track.stop());
+    session = undefined;
+    recorder = undefined;
+    stream = undefined;
+    throw error;
+  } finally {
+    firstChunk = undefined;
+  }
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   metadata.startedAt = startedAt;
@@ -66,7 +115,14 @@ async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; error
   if (!session || !recorder) return { ok: false, error: "No active recording was found." };
   const current = session;
   try {
-    if (recorder.state !== "inactive") await new Promise<void>((resolve, reject) => {
+    if (recorder.state === "inactive") {
+      throw new Error(microphoneTrackEnded
+        ? "The microphone stream ended before the session stopped. No complete recording was saved."
+        : "Chrome stopped the audio recorder early. No complete recording was saved.");
+    }
+    stopRequested = true;
+    const lastAudioChunkBeforeStop = lastAudioChunkAtMs;
+    await new Promise<void>((resolve, reject) => {
       recorder!.addEventListener("stop", () => resolve(), { once: true });
       recorder!.addEventListener("error", () => reject(new Error("Audio recording failed.")), { once: true });
       recorder!.stop();
@@ -76,13 +132,27 @@ async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; error
     const db = await database();
     const allChunks = await request<{ sessionId: string; chunkIndex: number; blob: Blob }[]>(db.transaction("chunks", "readonly").objectStore("chunks").getAll());
     const savedChunks = allChunks.filter((item) => item.sessionId === current.metadata.sessionId).sort((a, b) => a.chunkIndex - b.chunkIndex);
+    const elapsedMs = Date.parse(endedAt) - Date.parse(current.metadata.startedAt);
+    if (elapsedMs > 6000 && Date.parse(endedAt) - lastAudioChunkBeforeStop > 4000) {
+      throw new Error("The microphone stopped producing audio before the session ended. No incomplete recording was exported.");
+    }
+    if (elapsedMs > 4000 && savedChunks.length < 2) {
+      throw new Error(`Only ${savedChunks.length} microphone audio chunk was saved during a ${Math.round(elapsedMs / 1000)} second session. No complete recording was exported.`);
+    }
+    if (!savedChunks.some((item) => item.blob.size > 0)) {
+      throw new Error("No microphone audio was captured. The session was not exported as a recording.");
+    }
     current.metadata.endedAt = endedAt;
     const audio = new Blob(savedChunks.map((item) => item.blob), { type: recorder.mimeType || "audio/webm" });
+    const audioBytes = new Uint8Array(await audio.arrayBuffer());
+    if (audioBytes.length < 4 || audioBytes[0] !== 0x1a || audioBytes[1] !== 0x45 || audioBytes[2] !== 0xdf || audioBytes[3] !== 0xa3) {
+      throw new Error("The microphone did not produce a valid WebM recording. The session was not exported.");
+    }
     const events = current.events.map((event) => JSON.stringify(event)).join("\n") + (current.events.length ? "\n" : "");
     const zip = makeZip([
       ["session.json", new TextEncoder().encode(JSON.stringify(current.metadata, null, 2) + "\n")],
       ["events.jsonl", new TextEncoder().encode(events)],
-      ["audio.webm", new Uint8Array(await audio.arrayBuffer())]
+      ["audio.webm", audioBytes]
     ]);
     const url = URL.createObjectURL(zip);
     const tx = db.transaction(["sessions", "chunks"], "readwrite");
@@ -93,6 +163,10 @@ async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; error
     stream = undefined;
     return { ok: true, url };
   } catch (error) {
+    stream?.getTracks().forEach((track) => track.stop());
+    session = undefined;
+    recorder = undefined;
+    stream = undefined;
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

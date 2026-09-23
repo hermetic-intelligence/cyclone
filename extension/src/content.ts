@@ -4,6 +4,23 @@ let recording = false;
 let timer: number | undefined;
 let lastCode: string | undefined;
 let resultObserver: MutationObserver | undefined;
+let statusElement: HTMLDivElement | undefined;
+
+function showStatus(text: string, error = false) {
+  if (!statusElement) {
+    statusElement = document.createElement("div");
+    statusElement.id = "cyclone-capture-status";
+    statusElement.setAttribute("role", "status");
+    document.documentElement.append(statusElement);
+  }
+  statusElement.textContent = text;
+  statusElement.style.cssText = `position:fixed;right:20px;bottom:20px;z-index:2147483647;padding:10px 14px;border-radius:8px;background:${error ? "#991b1b" : "#b42318"};color:white;font:600 14px system-ui,sans-serif;box-shadow:0 2px 12px #0004;pointer-events:none;max-width:360px`;
+}
+
+function clearStatus() {
+  statusElement?.remove();
+  statusElement = undefined;
+}
 function visibleEditor(): HTMLTextAreaElement | null {
   const candidates = [...document.querySelectorAll<HTMLTextAreaElement>('textarea[aria-label="Code editor"], .monaco-editor textarea.inputarea')];
   return candidates.find((el) => el.getClientRects().length > 0) ?? candidates[0] ?? null;
@@ -81,15 +98,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   } else if (message?.type === "capture-final") {
     const editor = visibleEditor();
     sendResponse(editor ? { code: editor.value, language: currentLanguage() } : {});
+  } else if (message?.type === "capture-error") {
+    showStatus(`Cyclone could not start: ${message.message}`, true);
   } else if (message?.type === "capture-recording") {
     if (message.recording) {
       recording = true;
+      showStatus("● Cyclone recording");
       lastCode = undefined;
       document.addEventListener("click", onAction, true);
       timer = window.setInterval(pollCode, 750);
       pollCode();
     } else {
       recording = false;
+      clearStatus();
       if (timer !== undefined) window.clearInterval(timer);
       timer = undefined;
       document.removeEventListener("click", onAction, true);
