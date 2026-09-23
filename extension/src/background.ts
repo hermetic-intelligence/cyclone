@@ -1,7 +1,18 @@
 import type { ActiveSession, Message, SessionMetadata } from "./shared";
 
 const SESSION_KEY = "activeSession";
+const ERROR_KEY = "lastCaptureError";
 const OFFSCREEN_URL = "offscreen.html";
+
+async function showError(error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  await chrome.storage.local.set({ [ERROR_KEY]: message });
+  await chrome.action.setBadgeBackgroundColor({ color: "#b42318" });
+  await chrome.action.setBadgeText({ text: "!" });
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: "capture-error", message }).catch(() => undefined);
+  console.error("Cyclone capture:", error);
+}
 
 async function activeSession(): Promise<ActiveSession | undefined> {
   const stored = await chrome.storage.local.get(SESSION_KEY);
@@ -21,19 +32,38 @@ async function ensureOffscreen(): Promise<void> {
   }
 }
 
-async function begin(tab: chrome.tabs.Tab): Promise<void> {
-  if (!tab.id || !tab.url || !/^https:\/\/(?:[^/]+\.)?leetcode\.com\/problems\//.test(tab.url)) {
+async function begin(tab: chrome.tabs.Tab, openPermissionTab = true): Promise<void> {
+  if (!tab.id) {
     throw new Error("Open a LeetCode problem page before recording.");
   }
   const sessionId = crypto.randomUUID();
   const requestedAt = new Date().toISOString();
   await ensureOffscreen();
-  const response = await chrome.tabs.sendMessage(tab.id, { type: "capture-start" });
+  const response = await chrome.tabs.sendMessage(tab.id, { type: "capture-start" }).catch(() => {
+    throw new Error("Cyclone is not attached to this page. Reload the LeetCode problem tab once, then try again.");
+  });
   if (!response?.ok) throw new Error(response?.error ?? "Could not read the LeetCode editor. Reload the problem page and try again.");
+  if (!/^https:\/\/(?:[^/]+\.)?leetcode\.com\/problems\//.test(response.metadata?.problemUrl ?? "")) {
+    throw new Error("Open a LeetCode problem page before recording.");
+  }
 
-  const metadata: SessionMetadata = { sessionId, startedAt: requestedAt, problemUrl: tab.url, ...response.metadata };
+  const metadata: SessionMetadata = { sessionId, startedAt: requestedAt, ...response.metadata };
   const mic = await chrome.runtime.sendMessage({ type: "offscreen-start", metadata } satisfies Message);
-  if (!mic?.ok) throw new Error(mic?.error ?? "Microphone recording could not start.");
+  if (!mic?.ok) {
+    const permissionFailure = ["NotAllowedError", "PermissionDismissedError", "SecurityError"].includes(mic?.errorName) ||
+      /permission (?:denied|dismissed)|notallowederror/i.test(String(mic?.error ?? ""));
+    if (permissionFailure) {
+      if (!openPermissionTab) {
+        throw new Error("Cyclone needs lasting microphone access to record without an open tab. Start again and choose 'Allow while visiting the site' in Chrome's prompt.");
+      }
+      await chrome.storage.local.remove(ERROR_KEY);
+      await chrome.action.setBadgeBackgroundColor({ color: "#b45309" });
+      await chrome.action.setBadgeText({ text: "MIC" });
+      await chrome.tabs.create({ url: `${chrome.runtime.getURL("permission.html")}?tabId=${tab.id}`, active: true });
+      return;
+    }
+    throw new Error(mic?.error ?? "Microphone recording could not start.");
+  }
 
   const startedAtMs = mic.startedAtMs as number;
   const startedAt = mic.startedAt as string;
@@ -41,6 +71,7 @@ async function begin(tab: chrome.tabs.Tab): Promise<void> {
   await chrome.storage.local.set({ [SESSION_KEY]: { sessionId, tabId: tab.id, startedAtMs, startedAt } satisfies ActiveSession });
   await chrome.action.setBadgeBackgroundColor({ color: "#b42318" });
   await chrome.action.setBadgeText({ text: "REC" });
+  await chrome.storage.local.remove(ERROR_KEY);
   await chrome.tabs.sendMessage(tab.id, { type: "capture-recording", recording: true });
 }
 
@@ -59,7 +90,12 @@ async function end(session: ActiveSession): Promise<void> {
   await chrome.storage.local.remove(SESSION_KEY);
   await chrome.action.setBadgeText({ text: "" });
   if (!response?.ok) throw new Error(response?.error ?? "Could not finish the session export.");
-  const download = await chrome.downloads.download({ url: response.url, filename: `cyclone-${session.startedAt.slice(0, 10)}-${session.sessionId.slice(0, 8)}.zip`, saveAs: true });
+  const download = await chrome.downloads.download({
+    url: response.url,
+    filename: `Cyclone/cyclone-${session.startedAt.slice(0, 10)}-${session.sessionId.slice(0, 8)}.zip`,
+    saveAs: false,
+    conflictAction: "uniquify"
+  });
   const listener = (delta: chrome.downloads.DownloadDelta) => {
     if (delta.id === download && (delta.state?.current === "complete" || delta.state?.current === "interrupted")) {
       chrome.downloads.onChanged.removeListener(listener);
@@ -78,7 +114,7 @@ async function toggle(): Promise<void> {
 }
 
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "toggle-recording") void toggle().catch((error: unknown) => console.error("Cyclone capture:", error));
+  if (command === "toggle-recording") void toggle().catch(showError);
 });
 
 void activeSession().then((session) => {
@@ -89,13 +125,38 @@ void activeSession().then((session) => {
 });
 
 chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+  if (message.type === "offscreen-failed") {
+    void (async () => {
+      const session = await activeSession();
+      if (!session || session.sessionId !== message.sessionId) return;
+      await chrome.storage.local.remove(SESSION_KEY);
+      await chrome.tabs.sendMessage(session.tabId, { type: "capture-recording", recording: false }).catch(() => undefined);
+      await showError(new Error(message.reason));
+    })();
+    return false;
+  }
   if (message.type === "toggle") {
-    void toggle().then(() => sendResponse({ ok: true })).catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
+    void toggle().then(() => sendResponse({ ok: true })).catch((error: unknown) => {
+      void showError(error).then(() => sendResponse({ ok: false, error: String(error) }));
+    });
     return true;
   }
   if (message.type === "get-status") {
-    void activeSession().then((session) => sendResponse({ session })).catch(() => sendResponse({}));
+    void Promise.all([activeSession(), chrome.storage.local.get(ERROR_KEY)])
+      .then(([session, stored]) => sendResponse({ session, error: stored[ERROR_KEY] }))
+      .catch(() => sendResponse({}));
     return true;
+  }
+  if (message.type === "mic-permission-granted") {
+    sendResponse({ ok: true });
+    void (async () => {
+      if (await activeSession()) throw new Error("A Cyclone session is already recording.");
+      const tab = await chrome.tabs.get(message.tabId);
+      if (sender.tab?.id) await chrome.tabs.remove(sender.tab.id);
+      await chrome.tabs.update(message.tabId, { active: true });
+      await begin(tab, false);
+    })().catch(showError);
+    return false;
   }
   if (message.type === "page-start" || message.type === "page-event") {
     void activeSession().then(async (session) => {

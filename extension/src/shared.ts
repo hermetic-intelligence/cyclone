@@ -30,5 +30,7 @@ export type Message =
   | { type: "offscreen-start"; metadata: SessionMetadata }
   | { type: "offscreen-event"; event: CaptureEvent }
   | { type: "offscreen-stop"; endedAt: string }
+  | { type: "offscreen-failed"; sessionId: string; reason: string }
   | { type: "offscreen-export" }
-  | { type: "offscreen-revoke"; url: string };
+  | { type: "offscreen-revoke"; url: string }
+  | { type: "mic-permission-granted"; tabId: number };

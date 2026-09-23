@@ -6,3 +6,9 @@ __pycache__/
 session-analysis/
 *.zip
 *.webm
+.DS_Store
+extension/.outputs/
+.agents/
+.claude/
+.pi/
+skills-lock.json

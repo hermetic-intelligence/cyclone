@@ -1,6 +1,6 @@
 # Cyclone session processor
 
-Processes a session ZIP or extracted export directory into `report.md` and `analysis.json`. The source export stays intact; the analysis includes its path and SHA-256 digest. Events are retained verbatim (with canonicalized `tMs`) while duplicate consecutive code snapshots are compressed into `codeStates`.
+Processes a session ZIP or extracted export directory into `report.md` and `analysis.json`. The source export stays intact; the analysis includes its path and SHA-256 digest. Events are retained verbatim (with canonicalized `tMs`) while duplicate consecutive code snapshots are compressed into `codeStates`. The readable report uses `reportCodeStates`: the initial state and the last state before each editing pause of at least four seconds. All intermediate states remain in `analysis.json`.
 
 From the repository root, run:
 
