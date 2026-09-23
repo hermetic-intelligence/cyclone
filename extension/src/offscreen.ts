@@ -83,12 +83,19 @@ async function start(metadata: SessionMetadata): Promise<{ startedAt: string; st
       firstChunk?.();
     }
   });
+  // This is the shared origin for audio and page events. Set it immediately
+  // before start(), then keep it unchanged while waiting for the first chunk.
+  let startedAtMs = 0;
+  let startedAt = "";
   try {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("The microphone produced no audio data within 6 seconds. Check Chrome and macOS microphone access.")), 6000);
       firstChunk = () => { clearTimeout(timeout); resolve(); };
       recorder!.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("Audio recording failed to start.")); }, { once: true });
       recorder!.addEventListener("stop", () => { clearTimeout(timeout); reject(new Error("Audio recording stopped before it produced data.")); }, { once: true });
+      startedAtMs = Date.now();
+      startedAt = new Date(startedAtMs).toISOString();
+      metadata.startedAt = startedAt;
       recorder!.start(1000);
     });
     await persistQueue;
@@ -104,9 +111,6 @@ async function start(metadata: SessionMetadata): Promise<{ startedAt: string; st
   } finally {
     firstChunk = undefined;
   }
-  const startedAtMs = Date.now();
-  const startedAt = new Date(startedAtMs).toISOString();
-  metadata.startedAt = startedAt;
   await request(db.transaction("sessions", "readwrite").objectStore("sessions").put({ sessionId: metadata.sessionId, metadata, events: [] }));
   return { startedAt, startedAtMs };
 }

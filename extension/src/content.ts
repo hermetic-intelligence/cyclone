@@ -36,7 +36,11 @@ function currentLanguage(): string {
 
 function metadata() {
   const title = document.querySelector("[data-cy=question-title], [data-e2e-locator=question-title], h1")?.textContent?.trim() ?? document.title;
-  return { problemUrl: location.href, title, language: currentLanguage() };
+  const statementElement = document.querySelector<HTMLElement>(
+    '[data-track-load="description_content"], [data-e2e-locator="question-content"], .question-content__JfgR'
+  );
+  const problemStatement = statementElement?.innerText.trim() || null;
+  return { problemUrl: location.href, title, problemStatement, language: currentLanguage() };
 }
 
 function emit(type: "code" | "run" | "submit", extra: { code?: string; language?: string; result?: string } = {}) {

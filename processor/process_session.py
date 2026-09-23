@@ -5,12 +5,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Any
+
+EPISODE_GAP_MS = 8000
+EPISODE_MAX_MS = 60000
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -68,13 +72,13 @@ def compress_code_states(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep changed code snapshots only; event trace itself remains untouched."""
     states: list[dict[str, Any]] = []
     previous: str | None = None
-    for event in events:
+    for event_index, event in enumerate(events):
         if event["type"] != "code" or not isinstance(event.get("code"), str):
             continue
         code = event["code"]
         if code == previous:
             continue
-        states.append({"tMs": event["tMs"], "code": code,
+        states.append({"tMs": event["tMs"], "code": code, "eventIndex": event_index,
                        **({"language": event["language"]} if event.get("language") else {})})
         previous = code
     return states
@@ -132,6 +136,124 @@ def build_timeline(events: list[dict[str, Any]], speech: list[dict[str, Any]], s
     return sorted(items, key=lambda x: x["tMs"])
 
 
+def build_episodes(events: list[dict[str, Any]], states: list[dict[str, Any]],
+                   speech: list[dict[str, Any]], nearby_ms: int = EPISODE_GAP_MS,
+                   max_duration_ms: int = EPISODE_MAX_MS) -> list[dict[str, Any]]:
+    """Join nearby speech, changed code, and run/submit actions without losing source IDs.
+
+    Each activity is a point or a transcript interval. Consecutive activities with
+    no more than `nearby_ms` of silence between them form one episode. A new
+    episode starts after `max_duration_ms` unless the next activity overlaps
+    the current one. Original segment, state, and event indices refer to the
+    arrays in analysis.json.
+    """
+    activities: list[tuple[int, int, str, int]] = []
+    for index, segment in enumerate(speech):
+        start = max(0, int(segment["startMs"]))
+        end = max(start, int(segment["endMs"]))
+        activities.append((start, end, "speech", index))
+    for index, state in enumerate(states):
+        activities.append((state["tMs"], state["tMs"], "code", index))
+    for index, event in enumerate(events):
+        if event["type"] in ("run", "submit"):
+            activities.append((event["tMs"], event["tMs"], "action", index))
+    activities.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+
+    groups: list[list[tuple[int, int, str, int]]] = []
+    group_end = -1
+    group_start = -1
+    for activity in activities:
+        if (not groups or activity[0] > group_end + nearby_ms
+                or (activity[0] - group_start > max_duration_ms and activity[0] >= group_end)):
+            groups.append([activity])
+            group_start = activity[0]
+            group_end = activity[1]
+        else:
+            groups[-1].append(activity)
+            group_end = max(group_end, activity[1])
+
+    episodes: list[dict[str, Any]] = []
+    for group in groups:
+        start = min(item[0] for item in group)
+        end = max(item[1] for item in group)
+        segment_indices = sorted((item[3] for item in group if item[2] == "speech"),
+                                 key=lambda index: (speech[index]["startMs"], index))
+        state_indices = sorted(item[3] for item in group if item[2] == "code")
+        action_indices = sorted(item[3] for item in group if item[2] == "action")
+        before_index = (state_indices[0] - 1) if state_indices else next(
+            (index for index in range(len(states) - 1, -1, -1) if states[index]["tMs"] < start), None
+        )
+        if before_index is not None and before_index < 0:
+            before_index = None
+        after_index = state_indices[-1] if state_indices else before_index
+        episode = {
+            "startMs": start,
+            "endMs": end,
+            "speech": [speech[index]["text"] for index in segment_indices],
+            "codeBefore": states[before_index]["code"] if before_index is not None else None,
+            "codeAfter": states[after_index]["code"] if after_index is not None else None,
+            "actions": [
+                {"tMs": events[index]["tMs"], "type": events[index]["type"],
+                 **({"result": events[index]["result"]} if "result" in events[index] else {})}
+                for index in action_indices
+            ],
+            "source": {
+                "transcriptSegments": segment_indices,
+                "codeStates": state_indices,
+                "codeBeforeState": before_index,
+                "codeAfterState": after_index,
+                "eventIndices": [index for index, event in enumerate(events)
+                                 if start <= event["tMs"] <= end],
+            },
+        }
+        episodes.append(episode)
+    return episodes
+
+
+def markdown_fence(content: str, language: str = "") -> str:
+    """Fence captured page text or code, even when it contains backticks."""
+    longest = max((len(part) for part in re.findall(r"`+", content)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}{language}\n{content}\n{fence}"
+
+
+def render_agent_markdown(meta: dict[str, Any], episodes: list[dict[str, Any]],
+                          source_hash: str, warning: str | None) -> str:
+    out = [f"# {meta.get('title') or 'Untitled problem'}", "",
+           f"Problem: {meta.get('problemUrl') or 'Not recorded'}", "",
+           f"Language: {meta.get('language') or 'Not recorded'}", "",
+           f"Source SHA-256: `{source_hash}`", "", "## Problem statement", ""]
+    statement = meta.get("problemStatement")
+    out.append(markdown_fence(statement) if isinstance(statement, str) and statement.strip()
+               else "Not captured.")
+    out += ["", "## Synchronized episodes", ""]
+    if not episodes:
+        out.append("No speech, code changes, or run/submit actions were recorded.")
+    for index, episode in enumerate(episodes, 1):
+        out += [f"### Episode {index} ({episode['startMs']}–{episode['endMs']} ms)", "",
+                f"Source: transcript segments {episode['source']['transcriptSegments']}, "
+                f"code states {episode['source']['codeStates']}, "
+                f"before state {episode['source']['codeBeforeState']}, "
+                f"after state {episode['source']['codeAfterState']}, "
+                f"events {episode['source']['eventIndices']}", "", "Speech:"]
+        out += [f"- {line}" for line in episode["speech"]] or ["- None recorded"]
+        out += ["", "Code before:", "",
+                markdown_fence(episode["codeBefore"], meta.get("language") or "")
+                if episode["codeBefore"] is not None else "Unknown before capture.", "",
+                "Code after:", "",
+                markdown_fence(episode["codeAfter"], meta.get("language") or "")
+                if episode["codeAfter"] is not None else "No code recorded.", ""]
+        if episode["actions"]:
+            out += ["Actions:", ""]
+            out += [f"- {fmt_time(action['tMs'])} {action['type']}"
+                    + (f": {action['result']}" if action.get("result") is not None else "")
+                    for action in episode["actions"]]
+            out.append("")
+    if warning:
+        out += ["## Audio", "", warning, ""]
+    return "\n".join(out).rstrip() + "\n"
+
+
 def render_markdown(meta: dict[str, Any], events: list[dict[str, Any]], states: list[dict[str, Any]],
                     speech: list[dict[str, Any]], warning: str | None, source_hash: str) -> str:
     title = meta.get("title") or "Untitled problem"
@@ -181,6 +303,7 @@ def process(source: Path, output: Path, do_transcribe: bool = False, model: str 
             speech, warning = transcribe(audio, model)
         else:
             speech, warning = [], "Transcription was not requested; the original audio remains in the source export." if audio.exists() else None
+        episodes = build_episodes(events, states, speech)
         digest = hashlib.sha256(source.read_bytes()).hexdigest() if source.is_file() else hashlib.sha256(
             "\n".join(f"{p.relative_to(root)}:{hashlib.sha256(p.read_bytes()).hexdigest()}" for p in sorted(root.rglob("*")) if p.is_file()).encode()
         ).hexdigest()
@@ -189,8 +312,15 @@ def process(source: Path, output: Path, do_transcribe: bool = False, model: str 
                       "events": events, "codeStates": states, "reportCodeStates": report_states,
                       "transcript": speech,
                       "transcriptionWarning": warning}
+        agent = {"metadata": meta, "source": {"path": str(source), "sha256": digest,
+                                              "analysisFile": "analysis.json"},
+                 "episodeGapMs": EPISODE_GAP_MS, "episodeMaxMs": EPISODE_MAX_MS,
+                 "episodes": episodes,
+                 "transcriptionWarning": warning}
         (output / "analysis.json").write_text(json.dumps(structured, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         (output / "report.md").write_text(render_markdown(meta, events, report_states, speech, warning, digest), encoding="utf-8")
+        (output / "agent.json").write_text(json.dumps(agent, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        (output / "agent.md").write_text(render_agent_markdown(meta, episodes, digest, warning), encoding="utf-8")
     return output
 
 
@@ -206,7 +336,7 @@ def main() -> int:
     except (OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"Wrote {output / 'report.md'} and {output / 'analysis.json'}")
+    print(f"Wrote {output / 'analysis.json'}, {output / 'agent.json'}, {output / 'agent.md'}, and {output / 'report.md'}")
     return 0
 
 

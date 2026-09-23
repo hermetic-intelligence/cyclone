@@ -30,13 +30,14 @@ try {
   await page.route("https://leetcode.com/problems/cyclone-smoke/**", async (route) => {
     await route.fulfill({
       contentType: "text/html",
-      body: '<!doctype html><title>Cyclone smoke</title><h1>Test problem</h1><button>Python3</button><textarea aria-label="Code editor">print(1)</textarea>'
+      body: '<!doctype html><title>Cyclone smoke</title><h1>Test problem</h1><div data-track-load="description_content">Given an integer, return its square.</div><button>Python3</button><textarea aria-label="Code editor">print(1)</textarea>'
     });
   });
   await page.goto("https://leetcode.com/problems/cyclone-smoke/");
   await page.bringToFront();
 
   const start = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "toggle" }));
+  const startReturnedAtMs = Date.now();
   assert.equal(start?.ok, true, `start failed: ${JSON.stringify(start)}`);
   await page.locator("#cyclone-capture-status").getByText("Cyclone recording").waitFor();
   assert.equal(await worker.evaluate(() => chrome.action.getBadgeText({})), "REC");
@@ -66,6 +67,9 @@ try {
   const session = JSON.parse(execFileSync("unzip", ["-p", archive, "session.json"], { encoding: "utf8" }));
   const events = execFileSync("unzip", ["-p", archive, "events.jsonl"], { encoding: "utf8" });
   assert.equal(session.title, "Test problem");
+  assert.equal(session.problemStatement, "Given an integer, return its square.");
+  assert.ok(startReturnedAtMs - Date.parse(session.startedAt) >= 500,
+    "session clock must start before waiting for the first microphone chunk");
   assert.match(events, /print\(2\)/);
   console.log(`${realMic ? "Real mic" : "Fake mic"} capture smoke passed: ${audio.length} audio bytes, decodable Opus WebM, editor events, automatic ZIP download.`);
 } finally {

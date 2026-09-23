@@ -12,6 +12,7 @@ export type SessionMetadata = {
   endedAt?: string;
   problemUrl: string;
   title: string;
+  problemStatement?: string | null;
   language: string;
 };
 

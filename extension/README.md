@@ -1,6 +1,6 @@
 # Cyclone DSA Capture extension
 
-This Manifest V3 extension captures a LeetCode attempt locally. It records microphone audio, snapshots the editor when its full text changes, notes Run and Submit clicks, and saves one ZIP containing `session.json`, `events.jsonl`, and `audio.webm` under Chrome's `Downloads/Cyclone` folder.
+This Manifest V3 extension captures a LeetCode attempt locally. It records microphone audio, snapshots the visible problem statement and editor, notes Run and Submit clicks, and saves one ZIP containing `session.json`, `events.jsonl`, and `audio.webm` under Chrome's `Downloads/Cyclone` folder.
 
 ## Build and load
 
@@ -21,6 +21,6 @@ After rebuilding and reloading an already installed extension, reload the LeetCo
 
 ## Manual first-attempt check
 
-On a LeetCode problem page, confirm the extension can read the current editor and language, grant microphone access, and check that the toolbar icon shows `REC`. Cyclone waits for a nonempty microphone chunk before showing `REC`. Speak while making a few edits; Run or Submit once if available. Stop and inspect the ZIP in Chrome's `Downloads/Cyclone` folder: it should contain the three files above, code events should carry increasing `tMs`, and audio should play as WebM. Outcome labels are included only when the page visibly changes to a recognized result; an unobserved result is omitted.
+On a LeetCode problem page, confirm the extension can read the current editor and language, grant microphone access, and check that the toolbar icon shows `REC`. Cyclone waits for a nonempty microphone chunk before showing `REC`, while retaining the clock origin from immediately before the recorder started. Speak while making a few edits; Run or Submit once if available. Stop and inspect the ZIP in Chrome's `Downloads/Cyclone` folder: it should contain the three files above, `session.json` should contain `problemStatement` when the page exposes it, code events should carry increasing `tMs`, and audio should play as WebM. Outcome labels are included only when the page visibly changes to a recognized result; an unobserved result is omitted.
 
 The editor adapter uses the visible `textarea[aria-label="Code editor"]` value with a 750 ms poll. If Chrome has already blocked microphone access, the permission tab explains where to check Chrome and macOS microphone settings.

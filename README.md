@@ -1,12 +1,12 @@
 # Cyclone
 
-Cyclone is a small, local recorder for LeetCode practice. A Chrome extension captures microphone audio, code states, and observed Run/Submit events. A separate Python command turns the export into a readable timeline. The first goal is to record one real attempt and check whether the timeline faithfully reconstructs the work.
+Cyclone is a small, local recorder for LeetCode practice. A Chrome extension captures microphone audio, the problem statement, code states, and observed Run/Submit events. A separate Python command turns the export into synchronized speech and code episodes, plus a readable debug timeline.
 
 ## Capture stack
 
 The extension uses Bun to install dependencies and run its TypeScript/esbuild build for Chrome Manifest V3. A content script reads the visible LeetCode code editor, a service worker handles the shortcut, and an offscreen document records microphone audio with `MediaRecorder`. Audio chunks and events are written to IndexedDB during the session. The extension exports a ZIP on stop; it makes no network requests.
 
-The ZIP contains `session.json` for problem and session metadata, `events.jsonl` for timestamped `code`, `run`, and `submit` events, and `audio.webm`. Event `tMs` values are milliseconds since microphone recording began. Results are included only when the page visibly exposes them.
+The ZIP contains `session.json` for problem and session metadata, including a snapshot of the rendered statement when available; `events.jsonl` for timestamped `code`, `run`, and `submit` events; and `audio.webm`. Event `tMs` values and audio timestamps share the origin immediately before microphone recording begins. Results are included only when the page visibly exposes them.
 
 ## Try it
 
@@ -18,7 +18,7 @@ Process an export:
 uv run --project processor --locked python processor/process_session.py /path/to/cyclone-session.zip -o session-analysis
 ```
 
-This produces `report.md` and `analysis.json`. For local batch transcription, install `faster-whisper` and add `--transcribe`; see [processor/README.md](processor/README.md). The raw ZIP remains the source of truth.
+This produces `analysis.json`, `agent.json`, `agent.md`, and `report.md`. `agent.json` and `agent.md` group nearby speech, code changes, and Run/Submit actions into episodes. For local batch transcription, install `faster-whisper` and add `--transcribe`; see [processor/README.md](processor/README.md). Without transcription, episodes still contain code and actions. The raw ZIP remains the source of truth.
 
 ## Current validation boundary
 
