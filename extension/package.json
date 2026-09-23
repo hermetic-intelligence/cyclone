@@ -1,0 +1,15 @@
+{
+  "name": "cyclone-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/background.ts src/content.ts src/offscreen.ts src/popup.ts --bundle --format=esm --target=chrome120 --outdir=dist --entry-names=[name] && cp manifest.json popup.html offscreen.html dist/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.2"
+  }
+}

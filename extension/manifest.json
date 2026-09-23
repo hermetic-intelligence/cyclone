@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Cyclone DSA Capture",
+  "version": "0.1.0",
+  "description": "Capture LeetCode reasoning audio and code snapshots locally.",
+  "permissions": ["storage", "offscreen", "downloads", "activeTab"],
+  "host_permissions": ["https://leetcode.com/*", "https://*.leetcode.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Cyclone DSA Capture", "default_popup": "popup.html" },
+  "commands": {
+    "toggle-recording": {
+      "suggested_key": { "default": "Alt+Shift+R", "mac": "Alt+Shift+R" },
+      "description": "Start or stop a LeetCode capture"
+    }
+  },
+  "content_scripts": [{
+    "matches": ["https://leetcode.com/problems/*", "https://*.leetcode.com/problems/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
