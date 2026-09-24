@@ -10,7 +10,7 @@ The ZIP contains `session.json` for problem and session metadata, including a sn
 
 ## Try it
 
-Build and load the extension using [extension/README.md](extension/README.md). On a LeetCode problem, use **Alt+Shift+R** or the extension popup to start and stop. On first use, a full extension tab asks for lasting microphone access and closes before recording begins. The red `REC` badge indicates an active session. Stopping saves a ZIP under Chrome's `Downloads/Cyclone` folder.
+Build and load the extension using [extension/README.md](extension/README.md). On a LeetCode problem, use **Alt+Shift+R** or the extension popup to start and stop. On first use, a full extension tab asks for lasting microphone access and closes before recording begins. The red `REC` badge indicates an active session. Pressing **Submit** also ends the session after its visible result appears, or after 30 seconds if none appears. Either finish path saves a ZIP under Chrome's `Downloads/Cyclone` folder. With the local processor installed, the ZIP is transcribed and reported automatically.
 
 Process an export:
 
@@ -18,8 +18,8 @@ Process an export:
 uv run --project processor --locked python processor/process_session.py /path/to/cyclone-session.zip -o session-analysis
 ```
 
-This produces `analysis.json`, `agent.json`, `agent.md`, and `report.md`. `agent.json` and `agent.md` group nearby speech, code changes, and Run/Submit actions into episodes. For local batch transcription, install `faster-whisper` and add `--transcribe`; see [processor/README.md](processor/README.md). Without transcription, episodes still contain code and actions. The raw ZIP remains the source of truth.
+This produces `analysis.json`, `agent.json`, `agent.md`, and `report.md`. `agent.json` and `agent.md` group nearby speech, code changes, and Run/Submit actions into episodes. For local batch transcription, install `faster-whisper` and add `--transcribe`. To process future ZIPs automatically after a session ends, install the per-user macOS processor described in [processor/README.md](processor/README.md). Without transcription, episodes still contain code and actions. The raw ZIP remains the source of truth.
 
 ## Current validation boundary
 
-The extension build and processor tests check the code and export contract. Reading the visible editor textarea was verified on a live, unauthenticated LeetCode Two Sum page. A real Chrome attempt produced a decodable WebM spanning the six-minute session, 77 code events, and a local transcript. Speech recognition made some mistakes, but the original audio remains in the export. The logged-in Run/Submit flow has not yet been exercised; that attempt did not use either button. LeetCode can change its editor DOM, so real attempts remain useful integration checks.
+The extension build and processor tests check the code and export contract. Reading the visible editor textarea was verified on a live, unauthenticated LeetCode Two Sum page. A real Chrome attempt produced a decodable WebM spanning the six-minute session, 77 code events, and a local transcript. Speech recognition made some mistakes, but the original audio remains in the export. A synthetic Chromium page now checks Submit-triggered export and manual-stop races; a logged-in LeetCode Submit has not yet been exercised. LeetCode can change its editor DOM, so real attempts remain useful integration checks.

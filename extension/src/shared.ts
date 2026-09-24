@@ -23,11 +23,13 @@ export type ActiveSession = {
   startedAt: string;
 };
 
+export type PageEvent = Omit<CaptureEvent, "tMs">;
+
 export type Message =
   | { type: "toggle" }
   | { type: "get-status" }
   | { type: "page-start"; metadata: Omit<SessionMetadata, "sessionId" | "startedAt" | "endedAt">; initialCode: string }
-  | { type: "page-event"; event: Omit<CaptureEvent, "tMs"> }
+  | { type: "page-event"; event: PageEvent }
   | { type: "offscreen-start"; metadata: SessionMetadata }
   | { type: "offscreen-event"; event: CaptureEvent }
   | { type: "offscreen-stop"; endedAt: string }

@@ -4,6 +4,7 @@ let recording = false;
 let timer: number | undefined;
 let lastCode: string | undefined;
 let resultObserver: MutationObserver | undefined;
+let resultTimeout: number | undefined;
 let statusElement: HTMLDivElement | undefined;
 
 function showStatus(text: string, error = false) {
@@ -77,6 +78,7 @@ function onAction(event: MouseEvent) {
   if (!type) return;
   emit(type);
   resultObserver?.disconnect();
+  if (resultTimeout !== undefined) window.clearTimeout(resultTimeout);
   const before = visibleResult();
   const observer = new MutationObserver(() => {
     const result = visibleResult();
@@ -84,10 +86,17 @@ function onAction(event: MouseEvent) {
       emit(type, { result });
       observer.disconnect();
       window.clearTimeout(timeout);
+      resultObserver = undefined;
+      resultTimeout = undefined;
     }
   });
   observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
-  const timeout = window.setTimeout(() => observer.disconnect(), 30_000);
+  const timeout = window.setTimeout(() => {
+    observer.disconnect();
+    resultObserver = undefined;
+    resultTimeout = undefined;
+  }, 30_000);
+  resultTimeout = timeout;
   resultObserver = observer;
 }
 
@@ -119,6 +128,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       timer = undefined;
       document.removeEventListener("click", onAction, true);
       resultObserver?.disconnect();
+      resultObserver = undefined;
+      if (resultTimeout !== undefined) window.clearTimeout(resultTimeout);
+      resultTimeout = undefined;
     }
   }
 });

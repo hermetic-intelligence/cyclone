@@ -3,6 +3,12 @@ import type { ActiveSession, Message, SessionMetadata } from "./shared";
 const SESSION_KEY = "activeSession";
 const ERROR_KEY = "lastCaptureError";
 const OFFSCREEN_URL = "offscreen.html";
+const AUTO_STOP_ALARM_PREFIX = "cyclone-submit-";
+const AUTO_STOP_DELAY_MINUTES = 0.5;
+
+function autoStopAlarmName(sessionId: string): string {
+  return `${AUTO_STOP_ALARM_PREFIX}${sessionId}`;
+}
 
 async function showError(error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
@@ -75,7 +81,8 @@ async function begin(tab: chrome.tabs.Tab, openPermissionTab = true): Promise<vo
   await chrome.tabs.sendMessage(tab.id, { type: "capture-recording", recording: true });
 }
 
-async function end(session: ActiveSession): Promise<void> {
+async function endOnce(session: ActiveSession): Promise<void> {
+  await chrome.alarms.clear(autoStopAlarmName(session.sessionId));
   await chrome.tabs.sendMessage(session.tabId, { type: "capture-recording", recording: false }).catch(() => undefined);
   const final = await chrome.tabs.sendMessage(session.tabId, { type: "capture-final" }).catch(() => undefined);
   if (typeof final?.code === "string") {
@@ -105,6 +112,14 @@ async function end(session: ActiveSession): Promise<void> {
   chrome.downloads.onChanged.addListener(listener);
 }
 
+async function end(session: ActiveSession): Promise<void> {
+  return navigator.locks.request("cyclone-session-end", async () => {
+    const current = await activeSession();
+    if (!current || current.sessionId !== session.sessionId) return;
+    await endOnce(current);
+  });
+}
+
 async function toggle(): Promise<void> {
   const current = await activeSession();
   if (current) return end(current);
@@ -115,6 +130,15 @@ async function toggle(): Promise<void> {
 
 chrome.commands.onCommand.addListener((command) => {
   if (command === "toggle-recording") void toggle().catch(showError);
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (!alarm.name.startsWith(AUTO_STOP_ALARM_PREFIX)) return;
+  const sessionId = alarm.name.slice(AUTO_STOP_ALARM_PREFIX.length);
+  void activeSession().then(async (session) => {
+    if (!session || session.sessionId !== sessionId) return;
+    await end(session);
+  }).catch(showError);
 });
 
 void activeSession().then((session) => {
@@ -164,8 +188,21 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
       const event = message.type === "page-start"
         ? { type: "code" as const, code: message.initialCode, language: message.metadata.language }
         : message.event;
-      await chrome.runtime.sendMessage({ type: "offscreen-event", event: { ...event, tMs: Date.now() - session.startedAtMs } } satisfies Message);
-    }).catch((error) => console.error("Cyclone event:", error));
-    return false;
+      const saved = await chrome.runtime.sendMessage({ type: "offscreen-event", event: { ...event, tMs: Date.now() - session.startedAtMs } } satisfies Message);
+      if (!saved?.ok) throw new Error(saved?.error ?? "Could not save the LeetCode page event.");
+      if (message.type !== "page-event" || message.event.type !== "submit") return;
+      if (message.event.result) {
+        await end(session);
+      } else {
+        const alarmName = autoStopAlarmName(session.sessionId);
+        await chrome.alarms.create(alarmName, { delayInMinutes: AUTO_STOP_DELAY_MINUTES });
+        const stillActive = await activeSession();
+        if (!stillActive || stillActive.sessionId !== session.sessionId) await chrome.alarms.clear(alarmName);
+      }
+    }).then(() => sendResponse({ ok: true })).catch((error) => {
+      void showError(error);
+      sendResponse({ ok: false, error: String(error) });
+    });
+    return true;
   }
 });

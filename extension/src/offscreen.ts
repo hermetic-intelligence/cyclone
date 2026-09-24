@@ -28,6 +28,11 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
         const db = await database();
         await request(db.transaction("sessions", "readwrite").objectStore("sessions").put({ sessionId: current.metadata.sessionId, metadata: current.metadata, events: current.events }));
       });
+      void persistQueue.then(() => sendResponse({ ok: true })).catch((error: unknown) => sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+      return true;
     }
     sendResponse({ ok: Boolean(session) });
   }

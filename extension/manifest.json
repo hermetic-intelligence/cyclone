@@ -3,7 +3,7 @@
   "name": "Cyclone DSA Capture",
   "version": "0.1.0",
   "description": "Capture LeetCode reasoning audio and code snapshots locally.",
-  "permissions": ["storage", "offscreen", "downloads", "activeTab"],
+  "permissions": ["storage", "offscreen", "downloads", "activeTab", "alarms"],
   "host_permissions": ["https://leetcode.com/*", "https://*.leetcode.com/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Cyclone DSA Capture", "default_popup": "popup.html" },

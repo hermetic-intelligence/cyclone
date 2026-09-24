@@ -18,6 +18,18 @@ uv run --project processor --locked --extra transcribe python processor/process_
 
 The `transcribe` extra is recorded in `pyproject.toml` and `uv.lock`. The first transcription may download the selected model (`--model small` by default). Without the extra, audio is left untouched and the report explains that transcription was skipped.
 
+## Process future sessions automatically on macOS
+
+Run this once from the repository root:
+
+```sh
+python3 -m processor.install_automation
+```
+
+This installs the per-user LaunchAgent `com.e24z.cyclone.processor`. It watches `~/Downloads/Cyclone` for completed `cyclone-*.zip` downloads and checks again every minute. Each new ZIP is processed with local `faster-whisper` transcription into `~/Downloads/Cyclone/Reports/<ZIP name>/`. The folder contains `report.md`, `agent.md`, `agent.json`, `analysis.json`, and `.cyclone-processing.json` with the processing status. The raw ZIP is retained. ZIPs already present when the job is first installed are left alone; reinstalling retains that cutoff. Output and errors are logged to `~/Library/Logs/Cyclone/processor.log`. The installer copies the processor code to `~/Library/Application Support/Cyclone/runtime` so changing Git branches does not interrupt the background job; rerun the installer to apply processor updates.
+
+To process a specific older ZIP, use the manual `process_session.py` command above. To retry failed ZIPs, run `uv run --project processor --locked --extra transcribe python -m processor.watch_downloads --retry-failed` from the repository root; this also processes any other unprocessed older ZIPs. The installer records absolute paths to this checkout and `uv`; rerun it if either path changes.
+
 Run the processor tests from the repository root with `uv run --project processor --locked python -m unittest discover -s processor/tests -v`.
 
 Expected export files are `session.json`, `events.jsonl`, and optionally `audio.webm`. New exports include `problemStatement` in `session.json` when the page exposes it. Event timestamps are milliseconds relative to the same origin as `audio.webm`. `code` events carry `code`; `run` and `submit` may carry `result`.
