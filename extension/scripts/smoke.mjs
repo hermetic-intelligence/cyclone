@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 const extension = resolve(import.meta.dirname, "../dist");
 const realMic = process.env.CYCLONE_REAL_MIC === "1";
+const liveUpload = process.env.CYCLONE_TEST_UPLOAD === "1";
 const profile = await mkdtemp(resolve(tmpdir(), "cyclone-smoke-"));
 let context;
 
@@ -18,6 +19,7 @@ try {
     args: [
       `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`,
+      ...liveUpload ? [] : ["--proxy-server=127.0.0.1:1"],
       ...realMic ? ["--use-fake-ui-for-media-stream"] : ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"]
     ]
   });
@@ -34,8 +36,15 @@ try {
     });
   });
   await page.goto("https://leetcode.com/problems/cyclone-smoke/");
+  await context.setOffline(true);
   await page.bringToFront();
 
+  const consent = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "agree-upload" }));
+  assert.equal(consent?.ok, true);
+  const requestedModel = liveUpload ? "onnx-community/whisper-small.en" : "onnx-community/whisper-large-v3-turbo";
+  await popup.locator("#model").selectOption(requestedModel);
+  await popup.waitForFunction(async (model) => (await chrome.storage.local.get("transcriptionModel")).transcriptionModel === model,
+    requestedModel);
   const start = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "toggle" }));
   const startReturnedAtMs = Date.now();
   assert.equal(start?.ok, true, `start failed: ${JSON.stringify(start)}`);
@@ -50,18 +59,38 @@ try {
   await page.waitForTimeout(200);
   await page.locator("[data-e2e-locator='submission-result']").evaluate((element) => { element.textContent = "Accepted"; });
   await popup.bringToFront();
-  let download;
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const [item] = await popup.evaluate(() => chrome.downloads.search({ orderBy: ["-startTime"], limit: 1 }));
-    if (item?.state === "complete") { download = item; break; }
-    if (item?.state === "interrupted") throw new Error(`Download interrupted: ${item.error}`);
-    await page.waitForTimeout(250);
+  const firstDownloads = await waitForCompletedDownloads(popup, page, 2);
+  const raw = firstDownloads.find((item) => zipEntries(item.filename).includes("audio.webm"));
+  const reportZip = firstDownloads.find((item) => zipEntries(item.filename).includes("timeline.json"));
+  assert.ok(raw && reportZip, `Submit did not save raw and report ZIPs: ${JSON.stringify(firstDownloads)}`);
+  const archive = raw.filename;
+  const agent = execFileSync("unzip", ["-p", reportZip.filename, "README.md"], { encoding: "utf8" });
+  const analysis = JSON.parse(execFileSync("unzip", ["-p", reportZip.filename, "timeline.json"], { encoding: "utf8" }));
+  assert.equal(analysis.transcription.requestedModel, requestedModel);
+  assert.match(agent, /Given an integer, return its square\./);
+  assert.equal(analysis.source.sha256, hashFile(archive));
+  assert.match(analysis.source.path, /^Cyclone\/Sessions\/cyclone-/);
+  if (!liveUpload) {
+    assert.equal(analysis.transcription.status, "failed");
+    assert.match(analysis.transcriptionWarning, /Local transcription failed/);
   }
-  assert.ok(download, `Submit did not automatically save a ZIP: ${JSON.stringify(await popup.evaluate(() => chrome.downloads.search({})))}`);
-  const archive = download.filename;
   await page.waitForTimeout(1000);
   const completed = await popup.evaluate(() => chrome.downloads.search({ state: "complete" }));
-  assert.equal(completed.length, 1, "Submit/result caused duplicate ZIP exports");
+  assert.equal(completed.length, 2, "Submit/result caused duplicate ZIP exports");
+  const retainedUploads = await popup.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const opening = indexedDB.open("cyclone-capture", 2);
+      opening.onsuccess = () => resolve(opening.result);
+      opening.onerror = () => reject(opening.error);
+    });
+    const read = (store) => new Promise((resolve, reject) => {
+      const request = db.transaction(store, "readonly").objectStore(store).getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return { uploads: (await read("uploads")).length, sessions: (await read("sessions")).length };
+  });
+  if (!liveUpload) assert.deepEqual(retainedUploads, { uploads: 1, sessions: 0 }, "offline upload must survive raw-session cleanup");
   const alarmsAfterResult = await worker.evaluate(() => chrome.alarms.getAll());
   assert.ok(!alarmsAfterResult.some(({ name }) => name.startsWith("cyclone-submit-")), "result-driven stop should clear its fallback alarm");
   const audio = execFileSync("unzip", ["-p", archive, "audio.webm"]);
@@ -82,6 +111,10 @@ try {
   assert.match(events, /"result":"Accepted"/);
 
   // A manual stop while a Submit result is pending must cancel its timeout.
+  const changedModel = await popup.evaluate(() => chrome.runtime.sendMessage({
+    type: "set-transcription-model", model: "onnx-community/whisper-base.en"
+  }));
+  assert.equal(changedModel?.ok, true);
   await page.bringToFront();
   await popup.evaluate(() => chrome.runtime.sendMessage({ type: "toggle" }));
   await page.locator("#cyclone-capture-status").getByText("Cyclone recording").waitFor();
@@ -97,20 +130,54 @@ try {
   const alarm = alarmsWhilePending[0];
   const stop = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "toggle" }));
   assert.equal(stop?.ok, true, `stop failed: ${JSON.stringify(stop)}`);
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const [item] = await popup.evaluate(() => chrome.downloads.search({ orderBy: ["-startTime"], limit: 1 }));
-    if (item?.state === "complete" && item.filename !== archive) { break; }
-    if (item?.state === "interrupted") throw new Error(`Download interrupted: ${item.error}`);
-    await page.waitForTimeout(250);
-  }
+  await waitForCompletedDownloads(popup, page, 4);
   const alarmsAfterManualStop = await worker.evaluate(() => chrome.alarms.getAll());
   assert.ok(!alarmsAfterManualStop.some(({ name }) => name === alarm), "manual stop should cancel the pending Submit alarm");
   await page.locator("[data-e2e-locator='submission-result']").evaluate((element) => { element.textContent = "Wrong Answer"; });
   await page.waitForTimeout(1000);
   const allDownloads = await popup.evaluate(() => chrome.downloads.search({ state: "complete" }));
-  assert.equal(allDownloads.length, 2, "manual stop followed by a delayed result caused a duplicate export");
-  console.log(`${realMic ? "Real mic" : "Fake mic"} capture smoke passed: decodable Opus, Submit/result saved before automatic ZIP, manual stop cancels pending finish, no duplicate export.`);
+  assert.equal(allDownloads.length, 4, "manual stop followed by a delayed result caused a duplicate export");
+  if (liveUpload) {
+    await context.setOffline(false);
+    await popup.evaluate(() => chrome.runtime.sendMessage({ type: "offscreen-upload-pending" }));
+    await popup.waitForFunction(async () => {
+      const data = await chrome.storage.local.get("reportUploadStatus");
+      return data.reportUploadStatus?.status === "saved";
+    }, undefined, { timeout: 30000 });
+    const auth = await popup.evaluate(() => JSON.parse(localStorage.getItem("sb-dalyamgpwkllgwwfywpq-auth-token")));
+    assert.ok(auth?.access_token && auth?.refresh_token, "anonymous upload session was not saved");
+    const { createClient } = await import("@supabase/supabase-js");
+    const client = createClient("https://dalyamgpwkllgwwfywpq.supabase.co", "sb_publishable_15b21h1aMNKJohsGZzhY-w_SKHTE2v_", { auth: { persistSession: false } });
+    const restored = await client.auth.setSession({ access_token: auth.access_token, refresh_token: auth.refresh_token });
+    assert.ifError(restored.error);
+    const { data: stored, error: listError } = await client.storage.from("reports").list(auth.user.id);
+    assert.ifError(listError);
+    assert.equal(stored.length, 2, "the extension did not upload both synthetic reports");
+    const removed = await client.storage.from("reports").remove(stored.map((file) => `${auth.user.id}/${file.name}`));
+    assert.ifError(removed.error);
+  }
+  console.log(`${realMic ? "Real mic" : "Fake mic"} capture smoke passed: decodable Opus, separate local report with raw ZIP hash, ASR fallback, Submit/result and manual stop without duplicate exports.`);
 } finally {
   await context?.close();
   await rm(profile, { recursive: true, force: true });
+}
+
+async function waitForCompletedDownloads(popup, page, count) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const items = await popup.evaluate(() => chrome.downloads.search({}));
+    const interrupted = items.find((item) => item.state === "interrupted");
+    if (interrupted) throw new Error(`Download interrupted: ${interrupted.error}`);
+    const complete = items.filter((item) => item.state === "complete");
+    if (complete.length >= count) return complete;
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`Expected ${count} downloads: ${JSON.stringify(await popup.evaluate(() => chrome.downloads.search({})))}`);
+}
+
+function hashFile(path) {
+  return execFileSync("shasum", ["-a", "256", path], { encoding: "utf8" }).split(" ")[0];
+}
+
+function zipEntries(path) {
+  return execFileSync("unzip", ["-Z1", path], { encoding: "utf8" }).trim().split("\n");
 }

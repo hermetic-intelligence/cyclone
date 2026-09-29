@@ -1,0 +1,22 @@
+import { execFileSync } from "node:child_process";
+import { cp, copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { resolve } from "node:path";
+
+const root = resolve(import.meta.dirname, "..");
+const outputDir = resolve(root, ".outputs");
+const manifest = JSON.parse(await readFile(resolve(root, "dist/manifest.json"), "utf8"));
+const commit = process.env.CYCLONE_BUILD_SHA;
+if (commit && !/^[0-9a-f]{40}$/.test(commit)) throw new Error("CYCLONE_BUILD_SHA must be a full Git commit SHA");
+const name = `Cyclone-${manifest.version}${commit ? `-${commit.slice(0, 12)}` : ""}-friends`;
+const staging = resolve(outputDir, name);
+const output = resolve(outputDir, `${name}.zip`);
+await rm(staging, { recursive: true, force: true });
+await rm(output, { force: true });
+await mkdir(staging, { recursive: true });
+await cp(resolve(root, "dist"), resolve(staging, "extension"), { recursive: true });
+await copyFile(resolve(root, "FRIENDS.md"), resolve(staging, "README.md"));
+await copyFile(resolve(root, "../PRIVACY.md"), resolve(staging, "PRIVACY.md"));
+await copyFile(resolve(root, "../.agents/skills/cyclone-update/SKILL.md"), resolve(staging, "UPDATE-SKILL.md"));
+execFileSync("zip", ["-q", "-X", "-r", output, name], { cwd: outputDir });
+await rm(staging, { recursive: true, force: true });
+console.log(output);

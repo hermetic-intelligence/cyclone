@@ -1,25 +1,17 @@
 # Cyclone
 
-Cyclone is a small, local recorder for LeetCode practice. A Chrome extension captures microphone audio, the problem statement, code states, and observed Run/Submit events. A separate Python command turns the export into synchronized speech and code episodes, plus a readable debug timeline.
+Cyclone records LeetCode practice and prepares a local report. The Chrome extension captures microphone audio, the problem statement, code states, and observed Run/Submit events. After capture, it transcribes speech on the user's machine with WebGPU and presents speech, code snapshots, and actions in time order. Cyclone does not call a coaching model; the user can bring the report's `README.md` to one of their own.
 
-## Capture stack
+## Capture and report
 
-The extension uses Bun to install dependencies and run its TypeScript/esbuild build for Chrome Manifest V3. A content script reads the visible LeetCode code editor, a service worker handles the shortcut, and an offscreen document records microphone audio with `MediaRecorder`. Audio chunks and events are written to IndexedDB during the session. The extension exports a ZIP on stop; it makes no network requests.
+The extension uses a content script for the visible LeetCode editor, a service worker for the shortcut and downloads, and an offscreen document for microphone recording and report creation. Audio chunks and events are written to IndexedDB during capture. On stop, Cyclone first downloads a raw ZIP under `Downloads/Cyclone/Sessions` containing `session.json`, `events.jsonl`, and `audio.webm`. The recording and event clock share the same start time. Run/Submit results appear only when the page visibly exposes them.
 
-The ZIP contains `session.json` for problem and session metadata, including a snapshot of the rendered statement when available; `events.jsonl` for timestamped `code`, `run`, and `submit` events; and `audio.webm`. Event `tMs` values and audio timestamps share the origin immediately before microphone recording begins. Results are included only when the page visibly exposes them.
+The `ASR` badge appears while the offscreen document prepares a second ZIP under `Downloads/Cyclone/Reports`. That ZIP contains `README.md`, the main chronological account to share with a coaching model, and `timeline.json`, the complete captured event and timed transcript record. The raw ZIP remains the source of truth and its SHA-256 is recorded in the report. A WebGPU or model failure still produces a report with code and actions plus a visible transcription warning.
 
-## Try it
+Cyclone offers Base English, Small English, experimental Medium English, and experimental Large V3 Turbo for local transcription; Small is the default. Model weights download from Hugging Face on first use and are cached by the browser. In the current test build, Cyclone uploads completed report ZIPs, including code and transcript, to private Supabase storage after the user agrees in the popup. Raw audio stays local. See [extension/README.md](extension/README.md) for development and checks. The old Python processor and macOS watcher have been retired. The unlisted 0.2.0 Chrome Web Store submission remains pending review, but the current friend build is distributed as an unpacked extension; [CHROMEWEBSTORE.md](CHROMEWEBSTORE.md) records that older submission.
 
-Build and load the extension using [extension/README.md](extension/README.md). On a LeetCode problem, use **Alt+Shift+R** or the extension popup to start and stop. On first use, a full extension tab asks for lasting microphone access and closes before recording begins. The red `REC` badge indicates an active session. Pressing **Submit** also ends the session after its visible result appears, or after 30 seconds if none appears. Either finish path saves a ZIP under Chrome's `Downloads/Cyclone` folder. With the local processor installed, the ZIP is transcribed and reported automatically.
+Developer builds are published as commit-tagged prereleases when `main` is pushed. A friend with access to this private repository can ask their agent to follow [the Cyclone update skill](.agents/skills/cyclone-update/SKILL.md) to fetch, install, or update the unpacked extension. The skill is also included in each friends ZIP.
 
-Process an export:
+## Validation boundary
 
-```sh
-uv run --project processor --locked python processor/process_session.py /path/to/cyclone-session.zip -o session-analysis
-```
-
-This produces `analysis.json`, `agent.json`, `agent.md`, and `report.md`. `agent.json` and `agent.md` group nearby speech, code changes, and Run/Submit actions into episodes. For local batch transcription, install `faster-whisper` and add `--transcribe`. To process future ZIPs automatically after a session ends, install the per-user macOS processor described in [processor/README.md](processor/README.md). Without transcription, episodes still contain code and actions. The raw ZIP remains the source of truth.
-
-## Current validation boundary
-
-The extension build and processor tests check the code and export contract. Reading the visible editor textarea was verified on a live, unauthenticated LeetCode Two Sum page. A real Chrome attempt produced a decodable WebM spanning the six-minute session, 77 code events, and a local transcript. Speech recognition made some mistakes, but the original audio remains in the export. A synthetic Chromium page now checks Submit-triggered export and manual-stop races; a logged-in LeetCode Submit has not yet been exercised. LeetCode can change its editor DOM, so real attempts remain useful integration checks.
+A real Chrome Two Sum attempt produced a decodable six-minute WebM and 77 code events. In an isolated Chromium profile, Cyclone's offscreen WebGPU path transcribed that saved recording into 32 timed segments ending at 6m22s. The fake-microphone smoke test checks raw export, report fallback, Submit-triggered export, and manual-stop races. A logged-in LeetCode Submit and model quality on friends' machines have not yet been exercised. Speech recognition can mishear coding terms, so the raw audio remains available for checking exact words.
