@@ -23,7 +23,7 @@ if (buildNumber) {
   manifest.version = `${manifest.version}.${number}`;
 }
 await writeFile(resolve(dist, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-for (const filename of ["popup.html", "offscreen.html", "permission.html", "FRIENDS.md"]) {
+for (const filename of ["popup.html", "offscreen.html", "permission.html"]) {
   await copyFile(resolve(root, filename), resolve(dist, filename));
 }
 await mkdir(resolve(dist, "icons"), { recursive: true });

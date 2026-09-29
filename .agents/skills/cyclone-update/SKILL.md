@@ -5,7 +5,7 @@ description: Install or update Cyclone's unpacked Chrome extension from this rep
 
 # Update Cyclone
 
-Cyclone's current developer distribution is the private `e24z/cyclone` repository, not its older Chrome Web Store draft. A push to `main` creates a `dev-<full commit SHA>` prerelease with a `Cyclone-<version>-<short SHA>-friends.zip` asset. CI adds a numeric build component to the extension's manifest version so Chrome can show which release is installed. The user needs repository access; never ask for a token in chat or change repository visibility to make an update work.
+Cyclone's current developer distribution is the private `e24z/cyclone` repository. A push to `main` creates a `dev-<full commit SHA>` prerelease with a `Cyclone-<version>-<short SHA>-friends.zip` asset. CI adds a numeric build component to the extension's manifest version so Chrome can show which release is installed. The user needs repository access; never ask for a token in chat or change repository visibility to make an update work.
 
 1. Inspect the current browser and any installed Cyclone extension. If recording or report transcription is active, wait for it to finish before replacing files or reloading. Do not reload an unsaved LeetCode tab.
 2. Use `gh` to find the newest successful `dev-*` release in `e24z/cyclone`, inspect its tag and asset, and download that asset to a temporary directory. Verify the ZIP with `unzip -t`. The tag's full commit SHA and the asset's short SHA must agree. Extract it and confirm the contained `extension/manifest.json` names Cyclone and uses Manifest V3. Do not use a Store ZIP or an Actions artifact as the update source.

@@ -10,7 +10,7 @@ Cyclone downloads speech model files from Hugging Face when needed and caches th
 
 You can stop recording in the extension, delete the ZIP files from your Downloads folder, remove Cyclone's temporary browser data by removing the extension from Chrome, and revoke Cyclone's microphone access in Chrome's site settings. Removing the extension does not delete reports already uploaded to Supabase. To request deletion of an uploaded report, email the privacy contact below with the session ID from its report ZIP.
 
-Cyclone uses the recording and page details to create your report and help the developer evaluate the product. It does not sell the data or use it for advertising. The Chrome Web Store disclosure will be updated before a Store version with report upload is submitted.
+Cyclone uses the recording and page details to create your report and help the developer evaluate the product. It does not sell the data or use it for advertising.
 
 The extension does not provide a self-service control to delete an uploaded report or set a retention period. Contact the privacy address below to request deletion of an uploaded report. The current friends test has no published automatic deletion schedule; the developer should confirm deletion requests against the stored report and its session ID.
 

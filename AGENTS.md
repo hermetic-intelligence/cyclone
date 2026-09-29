@@ -14,4 +14,4 @@ For a live signed-in LeetCode check in the developer's Chrome, inspect the curre
 
 ## Friend releases
 
-Use the unpacked developer build for the current friends test. Run `bun run package:friends` to prepare the ZIP; it contains an `extension` directory to install. Each push to `main` creates a commit-tagged GitHub prerelease and attaches that ZIP. Friends need access to this private repository. Unpacked installations require replacing the files and reloading the extension; handle that through Chrome DevTools MCP where available. The older unlisted Chrome Web Store 0.2.0 submission is pending review and is not the current test release. Do not submit Store updates unless the user chooses that path again.
+Use the unpacked developer build for the current friends test. Run `bun run package:friends` to prepare the ZIP; it contains an `extension` directory to install. Each push to `main` creates a commit-tagged GitHub prerelease and attaches that ZIP. Friends need access to this private repository. Unpacked installations require replacing the files and reloading the extension; handle that through Chrome DevTools MCP where available.

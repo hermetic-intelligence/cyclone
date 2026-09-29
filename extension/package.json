@@ -5,9 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "package:store": "bun run build && node scripts/package-store.mjs",
     "package:friends": "bun run build && node scripts/package-friends.mjs",
-    "screenshot:store": "bun run build && node scripts/store-screenshot.mjs",
     "smoke": "bun run build && node scripts/smoke.mjs",
     "test:reports": "bun test scripts/report-contract.test.ts",
     "typecheck": "tsc --noEmit"

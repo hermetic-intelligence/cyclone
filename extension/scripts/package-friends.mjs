@@ -14,7 +14,7 @@ await rm(staging, { recursive: true, force: true });
 await rm(output, { force: true });
 await mkdir(staging, { recursive: true });
 await cp(resolve(root, "dist"), resolve(staging, "extension"), { recursive: true });
-await copyFile(resolve(root, "FRIENDS.md"), resolve(staging, "README.md"));
+await copyFile(resolve(root, "../README.md"), resolve(staging, "README.md"));
 await copyFile(resolve(root, "../PRIVACY.md"), resolve(staging, "PRIVACY.md"));
 await copyFile(resolve(root, "../LICENSE"), resolve(staging, "LICENSE"));
 await copyFile(resolve(root, "../.agents/skills/cyclone-update/SKILL.md"), resolve(staging, "UPDATE-SKILL.md"));
