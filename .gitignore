@@ -11,7 +11,7 @@ extension/.outputs/
 .agents/*
 !.agents/skills/
 .agents/skills/*
-!.agents/skills/cyclone-update/
+!.agents/skills/cyclone-install/
 .claude/
 .pi/
 skills-lock.json

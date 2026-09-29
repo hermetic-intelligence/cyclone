@@ -2,6 +2,8 @@
 
 Keep technical explanations readable in paragraphs. Use tables for comparisons and simple Mermaid diagrams for processes.
 
+For a user's first installation or update, follow the Friend releases section. The Extension development section is for changing and testing source code.
+
 ## Extension development
 
 Handle extension builds, installation in isolated test browsers, reloads, and verification for the developer. Do not make the developer use Chrome's Load unpacked or Reload controls for routine work.
@@ -14,4 +16,4 @@ For a live signed-in LeetCode check in the developer's Chrome, inspect the curre
 
 ## Friend releases
 
-Use the unpacked developer build for the current friends test. Run `bun run package:friends` to prepare the ZIP; it contains an `extension` directory to install. Each push to `main` creates a commit-tagged GitHub prerelease and attaches that ZIP. Friends need access to this private repository. Unpacked installations require replacing the files and reloading the extension; handle that through Chrome DevTools MCP where available.
+When a user asks to install or update Cyclone after cloning this repository, read `.agents/skills/cyclone-install/SKILL.md` and follow it. Prefer the prebuilt developer release: friends should not have to install Bun or build the extension. Each push to `main` creates a commit-tagged GitHub prerelease; users need access to this private repository. For a local development package, run `bun run package:friends` from `extension/`.
