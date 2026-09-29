@@ -12,6 +12,10 @@ Cyclone offers Base English, Small English, experimental Medium English, and exp
 
 Developer builds are published as commit-tagged prereleases when `main` is pushed. A friend with access to this private repository can ask their agent to follow [the Cyclone update skill](.agents/skills/cyclone-update/SKILL.md) to fetch, install, or update the unpacked extension. The skill is also included in each friends ZIP.
 
+Cyclone is currently a standalone capture and report tool. Its raw session ZIP and two-file report are the interface a future Cyclone service could consume; that service does not need to be designed or hosted for the extension to be useful now. The repository name is a distribution address, not a constraint on the product's eventual shape.
+
+The repository is private and [proprietarily licensed](LICENSE) for invited evaluation and contribution. The current [privacy policy](PRIVACY.md) covers the friends test and is included in the ZIP. [System requirements](extension/README.md#system-requirements) distinguish the tested local path from unverified platforms.
+
 ## Validation boundary
 
 A real Chrome Two Sum attempt produced a decodable six-minute WebM and 77 code events. In an isolated Chromium profile, Cyclone's offscreen WebGPU path transcribed that saved recording into 32 timed segments ending at 6m22s. The fake-microphone smoke test checks raw export, report fallback, Submit-triggered export, and manual-stop races. A logged-in LeetCode Submit and model quality on friends' machines have not yet been exercised. Speech recognition can mishear coding terms, so the raw audio remains available for checking exact words.

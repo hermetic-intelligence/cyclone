@@ -2,6 +2,19 @@
 
 This Manifest V3 extension records a LeetCode attempt and produces two downloads. The raw ZIP in `Downloads/Cyclone/Sessions` contains `session.json`, `events.jsonl`, and `audio.webm`. The report ZIP in `Downloads/Cyclone/Reports` contains `README.md` and `timeline.json`. Open the report ZIP and take `README.md` to your own coaching model.
 
+## System requirements
+
+| Need | Current requirement or limit |
+| --- | --- |
+| Browser | Desktop Google Chrome 120 or newer. The build targets Chrome 120 and the manifest enforces that minimum. |
+| Page | A LeetCode problem page. Cyclone only captures supported LeetCode problem pages. |
+| Microphone | A working microphone and Chrome microphone permission. Recording starts after you choose it in the popup or use the shortcut. |
+| Local transcription | A working WebGPU adapter in Chrome. If WebGPU or a model fails, Cyclone still saves code and actions with a transcription warning. |
+| Network | Access to Hugging Face for the first download of each speech model, and to Cyclone's Supabase project for the consented private report upload. |
+| Storage and memory | Room for downloaded model weights, browser cache, and session ZIPs. No reliable minimum RAM or free-disk threshold has been established; Medium and Large V3 Turbo remain experimental. |
+
+The validated local path is macOS on Apple silicon; the isolated browser smoke test and one saved-recording WebGPU test have run there. Windows, Linux, other GPUs, and friends' machines are not yet validated. Chrome's [WebGPU troubleshooting guide](https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips) explains how to check adapter availability.
+
 ## Build and load
 
 From this directory:

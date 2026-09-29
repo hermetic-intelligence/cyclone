@@ -16,6 +16,7 @@ await mkdir(staging, { recursive: true });
 await cp(resolve(root, "dist"), resolve(staging, "extension"), { recursive: true });
 await copyFile(resolve(root, "FRIENDS.md"), resolve(staging, "README.md"));
 await copyFile(resolve(root, "../PRIVACY.md"), resolve(staging, "PRIVACY.md"));
+await copyFile(resolve(root, "../LICENSE"), resolve(staging, "LICENSE"));
 await copyFile(resolve(root, "../.agents/skills/cyclone-update/SKILL.md"), resolve(staging, "UPDATE-SKILL.md"));
 execFileSync("zip", ["-q", "-X", "-r", output, name], { cwd: outputDir });
 await rm(staging, { recursive: true, force: true });

@@ -12,4 +12,6 @@ You can stop recording in the extension, delete the ZIP files from your Download
 
 Cyclone uses the recording and page details to create your report and help the developer evaluate the product. It does not sell the data or use it for advertising. The Chrome Web Store disclosure will be updated before a Store version with report upload is submitted.
 
+The extension does not provide a self-service control to delete an uploaded report or set a retention period. Contact the privacy address below to request deletion of an uploaded report. The current friends test has no published automatic deletion schedule; the developer should confirm deletion requests against the stored report and its session ID.
+
 For privacy questions, contact: prefect.bears.6y@icloud.com.
