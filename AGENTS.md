@@ -16,4 +16,4 @@ For a live signed-in LeetCode check in the developer's Chrome, inspect the curre
 
 ## Friend releases
 
-When a user asks to install or update Cyclone after cloning this repository, read `.agents/skills/cyclone-install/SKILL.md` and follow it. Prefer the prebuilt developer release: friends should not have to install Bun or build the extension. Each push to `main` creates a commit-tagged GitHub prerelease; users need access to this private repository. For a local development package, run `bun run package:friends` from `extension/`.
+When a user asks to install or update Cyclone after cloning this repository, read `.agents/skills/cyclone-install/SKILL.md` and follow it. Prefer the prebuilt developer release: friends should not have to install Bun or build the extension. Changes to `extension/` or the release workflow on `main` create a commit-tagged GitHub prerelease; README and skill changes alone do not. Users need access to this private repository. For a local development package, run `bun run package:friends` from `extension/`.
