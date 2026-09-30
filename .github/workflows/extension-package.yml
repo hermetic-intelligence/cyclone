@@ -3,6 +3,9 @@ name: Cyclone developer release
 on:
   push:
     branches: [main]
+    paths:
+      - 'extension/**'
+      - '.github/workflows/extension-package.yml'
   workflow_dispatch:
 
 permissions:
@@ -34,6 +37,7 @@ jobs:
           name: cyclone-friends-${{ github.sha }}
           path: extension/.outputs/Cyclone-*-friends.zip
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
       - name: Publish immutable developer release
         if: github.event_name == 'push'
