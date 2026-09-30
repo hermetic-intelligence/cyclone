@@ -1,15 +1,26 @@
 import type { CaptureEvent, Message, SessionMetadata } from "./shared";
+import { createReports } from "./reports";
+import { transcribeLocal } from "./transcribe";
+import { createClient } from "@supabase/supabase-js";
+import { TRANSCRIPTION_FALLBACK_MODEL } from "./shared";
+import type { TranscriptionModel } from "./shared";
 
-type StoredSession = { metadata: SessionMetadata; events: CaptureEvent[] };
+const supabase = createClient("https://dalyamgpwkllgwwfywpq.supabase.co", "sb_publishable_15b21h1aMNKJohsGZzhY-w_SKHTE2v_", {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+});
+type PendingUpload = { sessionId: string; blob: Blob };
+
+type StoredSession = { sessionId: string; metadata: SessionMetadata; events: CaptureEvent[]; sourceHash?: string };
 let session: StoredSession | undefined;
 let recorder: MediaRecorder | undefined;
 let stream: MediaStream | undefined;
-let stopping: Promise<{ ok: boolean; url?: string; error?: string }> | undefined;
+let stopping: Promise<{ ok: boolean; url?: string; sourceHash?: string; sessionId?: string; error?: string }> | undefined;
 let dbPromise: Promise<IDBDatabase> | undefined;
 let persistQueue = Promise.resolve();
 let stopRequested = false;
 let microphoneTrackEnded = false;
 let lastAudioChunkAtMs = 0;
+const processingReports = new Set<string>();
 
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   if (message.type === "offscreen-start") {
@@ -28,6 +39,11 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
         const db = await database();
         await request(db.transaction("sessions", "readwrite").objectStore("sessions").put({ sessionId: current.metadata.sessionId, metadata: current.metadata, events: current.events }));
       });
+      void persistQueue.then(() => sendResponse({ ok: true })).catch((error: unknown) => sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+      return true;
     }
     sendResponse({ ok: Boolean(session) });
   }
@@ -36,11 +52,60 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
     void stopping.then(sendResponse);
     return true;
   }
+  if (message.type === "offscreen-raw") {
+    void restoreRaw(message.sessionId, message.sourceHash).then((url) => sendResponse({ ok: true, url })).catch((error: unknown) => sendResponse({
+      ok: false, error: error instanceof Error ? error.message : String(error)
+    }));
+    return true;
+  }
   if (message.type === "offscreen-revoke") {
     URL.revokeObjectURL(message.url);
     sendResponse({ ok: true });
   }
+  if (message.type === "offscreen-process") {
+    if (processingReports.has(message.sessionId)) { sendResponse({ ok: true }); return; }
+    processingReports.add(message.sessionId);
+    sendResponse({ ok: true });
+    void processReport(message.sessionId, message.sourceHash, message.sourcePath, message.model).catch(async (error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      await chrome.runtime.sendMessage({ type: "offscreen-report-failed", sessionId: message.sessionId, reason } satisfies Message);
+    }).finally(() => processingReports.delete(message.sessionId));
+  }
+  if (message.type === "offscreen-cleanup") {
+    void cleanupReport(message.sessionId, message.url).then(() => sendResponse({ ok: true })).catch((error: unknown) => sendResponse({
+      ok: false, error: error instanceof Error ? error.message : String(error)
+    }));
+    return true;
+  }
+  if (message.type === "offscreen-upload-pending") {
+    void uploadPending().then(() => sendResponse({ ok: true })).catch((error: unknown) => sendResponse({ ok: false, error: String(error) }));
+    return true;
+  }
 });
+
+async function uploadPending(): Promise<void> {
+  await navigator.locks.request("cyclone-report-upload", async () => {
+    const db = await database();
+    const queued = await request<PendingUpload[]>(db.transaction("uploads", "readonly").objectStore("uploads").getAll());
+    if (!queued.length) return;
+    await chrome.runtime.sendMessage({ type: "upload-status", status: "uploading" } satisfies Message);
+    const { data: existing, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    const signedIn = existing.session ?? (await supabase.auth.signInAnonymously()).data.session;
+    if (!signedIn) throw new Error("Cyclone could not create a private upload identity.");
+    for (const item of queued) {
+      const path = `${signedIn.user.id}/${item.sessionId}.zip`;
+      const { error } = await supabase.storage.from("reports").upload(path, item.blob, {
+        contentType: "application/zip", upsert: false
+      });
+      if (error && !/already exists|duplicate/i.test(error.message)) throw error;
+      await request(db.transaction("uploads", "readwrite").objectStore("uploads").delete(item.sessionId));
+    }
+    await chrome.runtime.sendMessage({ type: "upload-status", status: "saved" } satisfies Message);
+  }).catch(async (error: unknown) => {
+    await chrome.runtime.sendMessage({ type: "upload-status", status: "retry", detail: error instanceof Error ? error.message : String(error) } satisfies Message);
+  });
+}
 
 async function start(metadata: SessionMetadata): Promise<{ startedAt: string; startedAtMs: number }> {
   if (session) throw new Error("A session is already recording.");
@@ -49,7 +114,7 @@ async function start(metadata: SessionMetadata): Promise<{ startedAt: string; st
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const mimeType = ["audio/webm;codecs=opus", "audio/webm"].find((type) => MediaRecorder.isTypeSupported(type));
   recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-  session = { metadata, events: [] };
+  session = { sessionId: metadata.sessionId, metadata, events: [] };
   stopRequested = false;
   microphoneTrackEnded = false;
   lastAudioChunkAtMs = 0;
@@ -83,12 +148,19 @@ async function start(metadata: SessionMetadata): Promise<{ startedAt: string; st
       firstChunk?.();
     }
   });
+  // This is the shared origin for audio and page events. Set it immediately
+  // before start(), then keep it unchanged while waiting for the first chunk.
+  let startedAtMs = 0;
+  let startedAt = "";
   try {
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("The microphone produced no audio data within 6 seconds. Check Chrome and macOS microphone access.")), 6000);
       firstChunk = () => { clearTimeout(timeout); resolve(); };
       recorder!.addEventListener("error", () => { clearTimeout(timeout); reject(new Error("Audio recording failed to start.")); }, { once: true });
       recorder!.addEventListener("stop", () => { clearTimeout(timeout); reject(new Error("Audio recording stopped before it produced data.")); }, { once: true });
+      startedAtMs = Date.now();
+      startedAt = new Date(startedAtMs).toISOString();
+      metadata.startedAt = startedAt;
       recorder!.start(1000);
     });
     await persistQueue;
@@ -104,14 +176,11 @@ async function start(metadata: SessionMetadata): Promise<{ startedAt: string; st
   } finally {
     firstChunk = undefined;
   }
-  const startedAtMs = Date.now();
-  const startedAt = new Date(startedAtMs).toISOString();
-  metadata.startedAt = startedAt;
   await request(db.transaction("sessions", "readwrite").objectStore("sessions").put({ sessionId: metadata.sessionId, metadata, events: [] }));
   return { startedAt, startedAtMs };
 }
 
-async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; error?: string }> {
+async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; sourceHash?: string; sessionId?: string; error?: string }> {
   if (!session || !recorder) return { ok: false, error: "No active recording was found." };
   const current = session;
   try {
@@ -148,20 +217,17 @@ async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; error
     if (audioBytes.length < 4 || audioBytes[0] !== 0x1a || audioBytes[1] !== 0x45 || audioBytes[2] !== 0xdf || audioBytes[3] !== 0xa3) {
       throw new Error("The microphone did not produce a valid WebM recording. The session was not exported.");
     }
-    const events = current.events.map((event) => JSON.stringify(event)).join("\n") + (current.events.length ? "\n" : "");
-    const zip = makeZip([
-      ["session.json", new TextEncoder().encode(JSON.stringify(current.metadata, null, 2) + "\n")],
-      ["events.jsonl", new TextEncoder().encode(events)],
-      ["audio.webm", audioBytes]
-    ]);
+    const zip = makeRawZip(current.metadata, current.events, audioBytes);
+    const sourceHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await zip.arrayBuffer()))]
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
     const url = URL.createObjectURL(zip);
-    const tx = db.transaction(["sessions", "chunks"], "readwrite");
-    tx.objectStore("sessions").delete(current.metadata.sessionId);
-    for (const item of savedChunks) tx.objectStore("chunks").delete(`${current.metadata.sessionId}:${item.chunkIndex}`);
+    await request(db.transaction("sessions", "readwrite").objectStore("sessions").put({
+      ...current, sourceHash
+    } satisfies StoredSession));
     session = undefined;
     recorder = undefined;
     stream = undefined;
-    return { ok: true, url };
+    return { ok: true, url, sessionId: current.metadata.sessionId, sourceHash };
   } catch (error) {
     stream?.getTracks().forEach((track) => track.stop());
     session = undefined;
@@ -171,13 +237,110 @@ async function stop(endedAt: string): Promise<{ ok: boolean; url?: string; error
   }
 }
 
+function makeRawZip(metadata: SessionMetadata, events: CaptureEvent[], audioBytes: Uint8Array): Blob {
+  const eventLines = events.map((event) => JSON.stringify(event)).join("\n") + (events.length ? "\n" : "");
+  return makeZip([
+    ["session.json", new TextEncoder().encode(JSON.stringify(metadata, null, 2) + "\n")],
+    ["events.jsonl", new TextEncoder().encode(eventLines)],
+    ["audio.webm", audioBytes]
+  ]);
+}
+
+async function restoreRaw(sessionId: string, sourceHash: string): Promise<string> {
+  const db = await database();
+  const saved = await request<StoredSession | undefined>(db.transaction("sessions", "readonly").objectStore("sessions").get(sessionId));
+  if (!saved?.metadata.endedAt || saved.sourceHash !== sourceHash) throw new Error("The saved raw session cannot be restored.");
+  const chunks = await request<{ sessionId: string; chunkIndex: number; blob: Blob }[]>(db.transaction("chunks", "readonly").objectStore("chunks").getAll());
+  const audioChunks = chunks.filter((chunk) => chunk.sessionId === sessionId).sort((a, b) => a.chunkIndex - b.chunkIndex);
+  if (!audioChunks.length) throw new Error("The saved microphone chunks cannot be restored.");
+  const audioBytes = new Uint8Array(await new Blob(audioChunks.map((chunk) => chunk.blob)).arrayBuffer());
+  const zip = makeRawZip(saved.metadata, saved.events, audioBytes);
+  const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await zip.arrayBuffer()))]
+    .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (hash !== sourceHash) throw new Error("The restored raw ZIP differs from the original recording.");
+  return URL.createObjectURL(zip);
+}
+
+async function processReport(sessionId: string, sourceHash: string, sourcePath: string, requestedModel: TranscriptionModel): Promise<void> {
+  const db = await database();
+  const saved = await request<StoredSession | undefined>(db.transaction("sessions", "readonly").objectStore("sessions").get(sessionId));
+  if (!saved?.metadata.endedAt || saved.sourceHash !== sourceHash) throw new Error("The saved raw session is unavailable for report creation.");
+  const chunks = await request<{ sessionId: string; chunkIndex: number; blob: Blob }[]>(db.transaction("chunks", "readonly").objectStore("chunks").getAll());
+  const audioChunks = chunks.filter((chunk) => chunk.sessionId === sessionId).sort((a, b) => a.chunkIndex - b.chunkIndex);
+  if (!audioChunks.length) throw new Error("The saved microphone recording is unavailable for report creation.");
+  const audio = new Blob(audioChunks.map((chunk) => chunk.blob), { type: "audio/webm" });
+  let transcript: Awaited<ReturnType<typeof transcribeLocal>> = [];
+  let model: string = requestedModel;
+  let fallbackReason: string | null = null;
+  let warning: string | null = null;
+  let timer: number | undefined;
+  try {
+    transcript = await Promise.race([
+      transcribeLocal(audio, requestedModel),
+      new Promise<never>((_resolve, reject) => {
+        const minutes = requestedModel === "onnx-community/whisper-large-v3-turbo" || requestedModel === "Xenova/whisper-medium.en" ? 10 : 6;
+        timer = self.setTimeout(() => reject(new Error(`Local transcription took longer than ${minutes} minutes.`)), minutes * 60000);
+      })
+    ]);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (/longer than \d+ minutes/.test(reason)) {
+      warning = `Local transcription failed: ${reason}. The original audio remains in the raw session ZIP.`;
+    } else {
+      if (requestedModel === TRANSCRIPTION_FALLBACK_MODEL) {
+        warning = `Local transcription failed: ${reason}. The original audio remains in the raw session ZIP.`;
+      } else {
+        fallbackReason = `${requestedModel} failed: ${reason}`;
+        model = TRANSCRIPTION_FALLBACK_MODEL;
+        try {
+          transcript = await transcribeLocal(audio, model);
+        } catch (fallbackError) {
+          warning = `Local transcription failed with both models: ${fallbackReason}; ${model} failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}. The original audio remains in the raw session ZIP.`;
+        }
+      }
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  const report = makeZip(createReports(saved.metadata, saved.events, transcript, warning, sourceHash, sourcePath, model, fallbackReason, requestedModel));
+  await request(db.transaction("uploads", "readwrite").objectStore("uploads").put({ sessionId, blob: report } satisfies PendingUpload));
+  const url = URL.createObjectURL(report);
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "offscreen-report-ready", sessionId, url } satisfies Message);
+    if (!response?.ok) throw new Error(response?.error ?? "The report download could not start.");
+    void uploadPending();
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+
+async function cleanupReport(sessionId: string, url?: string): Promise<void> {
+  if (url) URL.revokeObjectURL(url);
+  const db = await database();
+  const chunks = await request<{ sessionId: string; chunkIndex: number }[]>(db.transaction("chunks", "readonly").objectStore("chunks").getAll());
+  const tx = db.transaction(["sessions", "chunks"], "readwrite");
+  tx.objectStore("sessions").delete(sessionId);
+  for (const item of chunks) if (item.sessionId === sessionId) tx.objectStore("chunks").delete(`${sessionId}:${item.chunkIndex}`);
+  await transactionDone(tx);
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("Session cleanup failed."));
+    tx.onabort = () => reject(tx.error ?? new Error("Session cleanup was aborted."));
+  });
+}
+
 function database(): Promise<IDBDatabase> {
   if (!dbPromise) dbPromise = new Promise((resolve, reject) => {
-    const opening = indexedDB.open("cyclone-capture", 1);
+    const opening = indexedDB.open("cyclone-capture", 2);
     opening.onupgradeneeded = () => {
       const db = opening.result;
-      db.createObjectStore("sessions", { keyPath: "sessionId" });
-      db.createObjectStore("chunks", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("sessions")) db.createObjectStore("sessions", { keyPath: "sessionId" });
+      if (!db.objectStoreNames.contains("chunks")) db.createObjectStore("chunks", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("uploads")) db.createObjectStore("uploads", { keyPath: "sessionId" });
     };
     opening.onsuccess = () => resolve(opening.result);
     opening.onerror = () => reject(opening.error ?? new Error("Could not open session storage."));

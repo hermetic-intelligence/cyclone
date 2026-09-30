@@ -4,6 +4,7 @@ let recording = false;
 let timer: number | undefined;
 let lastCode: string | undefined;
 let resultObserver: MutationObserver | undefined;
+let resultTimeout: number | undefined;
 let statusElement: HTMLDivElement | undefined;
 
 function showStatus(text: string, error = false) {
@@ -36,7 +37,11 @@ function currentLanguage(): string {
 
 function metadata() {
   const title = document.querySelector("[data-cy=question-title], [data-e2e-locator=question-title], h1")?.textContent?.trim() ?? document.title;
-  return { problemUrl: location.href, title, language: currentLanguage() };
+  const statementElement = document.querySelector<HTMLElement>(
+    '[data-track-load="description_content"], [data-e2e-locator="question-content"], .question-content__JfgR'
+  );
+  const problemStatement = statementElement?.innerText.trim() || null;
+  return { problemUrl: location.href, title, problemStatement, language: currentLanguage() };
 }
 
 function emit(type: "code" | "run" | "submit", extra: { code?: string; language?: string; result?: string } = {}) {
@@ -73,6 +78,7 @@ function onAction(event: MouseEvent) {
   if (!type) return;
   emit(type);
   resultObserver?.disconnect();
+  if (resultTimeout !== undefined) window.clearTimeout(resultTimeout);
   const before = visibleResult();
   const observer = new MutationObserver(() => {
     const result = visibleResult();
@@ -80,10 +86,17 @@ function onAction(event: MouseEvent) {
       emit(type, { result });
       observer.disconnect();
       window.clearTimeout(timeout);
+      resultObserver = undefined;
+      resultTimeout = undefined;
     }
   });
   observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
-  const timeout = window.setTimeout(() => observer.disconnect(), 30_000);
+  const timeout = window.setTimeout(() => {
+    observer.disconnect();
+    resultObserver = undefined;
+    resultTimeout = undefined;
+  }, 30_000);
+  resultTimeout = timeout;
   resultObserver = observer;
 }
 
@@ -115,6 +128,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       timer = undefined;
       document.removeEventListener("click", onAction, true);
       resultObserver?.disconnect();
+      resultObserver = undefined;
+      if (resultTimeout !== undefined) window.clearTimeout(resultTimeout);
+      resultTimeout = undefined;
     }
   }
 });

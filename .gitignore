@@ -8,7 +8,10 @@ session-analysis/
 *.webm
 .DS_Store
 extension/.outputs/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/cyclone-install/
 .claude/
 .pi/
 skills-lock.json
