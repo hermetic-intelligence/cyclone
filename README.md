@@ -4,10 +4,12 @@ Cyclone captures a LeetCode practice attempt and makes a report you can take to 
 
 ## Install and update
 
-Paste this into an agent of your choice that can access your GitHub account and control Chrome:
+The repository is currently private. First accept your repository invitation, then sign in to GitHub on the machine where your agent runs (for example, with `gh auth login`). An agent browsing anonymously cannot read this repository, even if you can open it in your own browser.
+
+Paste this into an agent of your choice that can use your authenticated GitHub access and control Chrome:
 
 ```text
-Install Cyclone from https://github.com/hermetic-intelligence/cyclone for me. Use the latest developer release and verify that it works in my Chrome profile.
+Install Cyclone from https://github.com/hermetic-intelligence/cyclone for me using my existing authenticated GitHub access. If you cannot access the private repository, explain that before trying to install. Use the latest developer release and verify that it works in my Chrome profile.
 ```
 
 Your agent can discover the repository's [install and update skill](.agents/skills/cyclone-install/SKILL.md) after cloning it. The skill uses the newest prebuilt `dev-*` prerelease; you do not need Bun or a local build. You do need access to this private repository. The first recording asks for microphone permission. Open the Cyclone popup on a LeetCode problem, choose a local speech model, agree to private report upload, and start. Stop in the popup or finish with Submit.
