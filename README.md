@@ -2,13 +2,21 @@
 
 Cyclone captures a LeetCode practice attempt and makes a report you can take to your own coaching model. It records your microphone, code states, the problem statement, and visible Run/Submit results. Speech transcription runs locally in Chrome; Cyclone does not provide a coaching model.
 
-## Use Cyclone
+## Install and update
 
 Cyclone currently needs desktop Chrome 120 or newer, a microphone, a LeetCode problem page, and a working WebGPU adapter for transcription. The first use of a speech model needs internet access to download its weights. Report upload also needs internet access. Leave room for model files, browser cache, and recording ZIPs. We have tested the local path on an Apple silicon Mac; there is no established minimum RAM or verified Windows/Linux support. Larger transcription models remain experimental.
 
-For the friends test, ask your agent: **“Clone `e24z/cyclone` and follow its `AGENTS.md` to install Cyclone for me.”** The repository contains the [Cyclone install skill](.agents/skills/cyclone-install/SKILL.md). Your agent can fetch the newest prebuilt `dev-*` prerelease from the private [Releases page](https://github.com/e24z/cyclone/releases); you do not need Bun or a local build. You do need access to the repository. The first recording asks for microphone permission. Open the Cyclone popup on a LeetCode problem, choose a local speech model, agree to private report upload, and start. Stop in the popup or finish with Submit.
+Paste this into an agent of your choice that can access your GitHub account and control Chrome:
 
-The agent can use the same skill for later updates. Each push to `main` creates a commit-tagged developer prerelease, but an unpacked Chrome extension does not update itself: the agent must replace its files and reload it. If you want the skill available to your Codex agent outside this checkout, you may install the **skill alone** from the cloned repo with `npx skills add . --skill cyclone-install -g -a codex -y`. That optional command does not install Cyclone in Chrome.
+> Install Cyclone from https://github.com/hermetic-intelligence/cyclone for me. Use the latest developer release and verify that it works in my Chrome profile.
+
+Your agent can discover the repository's [install and update skill](.agents/skills/cyclone-install/SKILL.md) after cloning it. The skill uses the newest prebuilt `dev-*` prerelease; you do not need Bun or a local build. You do need access to this private repository. The first recording asks for microphone permission. Open the Cyclone popup on a LeetCode problem, choose a local speech model, agree to private report upload, and start. Stop in the popup or finish with Submit.
+
+For an update, paste:
+
+> Update my Cyclone extension from https://github.com/hermetic-intelligence/cyclone. Keep my current Chrome profile and verify the installed version.
+
+Each push to `main` creates a commit-tagged developer prerelease, but an unpacked Chrome extension does not update itself. Ask your agent to update it when you want the newest build. The agent replaces the installed files and reloads the extension. If you want the skill available to your Codex agent outside this checkout, you may install the **skill alone** from the cloned repo with `npx skills add . --skill cyclone-install -g -a codex -y`. That optional command does not install Cyclone in Chrome.
 
 | Download | Contents | Use |
 | --- | --- | --- |
