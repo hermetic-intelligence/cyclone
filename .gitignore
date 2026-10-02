@@ -15,3 +15,4 @@ extension/.outputs/
 .claude/
 .pi/
 skills-lock.json
+supabase/.temp/
