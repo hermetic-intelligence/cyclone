@@ -8,7 +8,8 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await build({
   absWorkingDir: root,
-  entryPoints: ["src/background.ts", "src/content.ts", "src/offscreen.ts", "src/popup.ts", "src/permission.ts"],
+  entryPoints: { background: "src/background.ts", content: "src/content.ts", offscreen: "src/offscreen.ts", popup: "src/popup.ts", permission: "src/permission.ts", settings: "src/settings/index.tsx" },
+  define: { "process.env.NODE_ENV": '"production"' },
   bundle: true,
   format: "esm",
   target: "chrome120",
@@ -23,7 +24,7 @@ if (buildNumber) {
   manifest.version = `${manifest.version}.${number}`;
 }
 await writeFile(resolve(dist, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-for (const filename of ["popup.html", "offscreen.html", "permission.html"]) {
+for (const filename of ["popup.html", "offscreen.html", "permission.html", "settings.html"]) {
   await copyFile(resolve(root, filename), resolve(dist, filename));
 }
 await mkdir(resolve(dist, "icons"), { recursive: true });

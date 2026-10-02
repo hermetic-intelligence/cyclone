@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cyclone DSA Capture",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "minimum_chrome_version": "120",
   "description": "Capture LeetCode attempts, create local reports, and privately sync reports for feedback.",
   "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
@@ -10,6 +10,7 @@
   "content_security_policy": { "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';" },
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_title": "Cyclone DSA Capture", "default_popup": "popup.html", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png" } },
+  "options_ui": { "page": "settings.html", "open_in_tab": true },
   "commands": {
     "toggle-recording": {
       "suggested_key": { "default": "Alt+Shift+R", "mac": "Alt+Shift+R" },

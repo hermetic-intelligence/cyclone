@@ -1,6 +1,6 @@
 # Cyclone DSA Capture privacy policy
 
-Last updated: 29 September 2026
+Last updated: 2 October 2026
 
 Cyclone records a LeetCode practice attempt only when you start a recording. It reads the current problem URL and statement, the visible code editor, and observed Run and Submit actions and results. It also records your microphone audio while a session is active. These details may contain information you choose to type or say.
 
@@ -8,7 +8,7 @@ Cyclone keeps the recording and events in your browser while the session is bein
 
 Cyclone downloads speech model files from Hugging Face when needed and caches them in the browser for reuse. Like other network requests, these requests expose connection information such as your IP address to the provider. Cyclone sends the report ZIP, including code, problem content, and transcript, to Supabase for storage. It does not send microphone audio or the raw recording ZIP. The extension has no analytics, advertising, or Cyclone-hosted coaching model. If you share a report with your own model or another person, that sharing is under your control and subject to their privacy practices.
 
-You can stop recording in the extension, delete the ZIP files from your Downloads folder, remove Cyclone's temporary browser data by removing the extension from Chrome, and revoke Cyclone's microphone access in Chrome's site settings. Removing the extension does not delete reports already uploaded to Supabase. To request deletion of an uploaded report, email the privacy contact below with the session ID from its report ZIP.
+You can inspect and delete cached speech model files in the extension’s Models and storage page. This keeps recordings and reports; a deleted model downloads again if used. You can stop recording in the extension, delete the ZIP files from your Downloads folder, remove Cyclone's temporary browser data by removing the extension from Chrome, and revoke Cyclone's microphone access in Chrome's site settings. Removing the extension does not delete reports already uploaded to Supabase. To request deletion of an uploaded report, email the privacy contact below with the session ID from its report ZIP.
 
 Cyclone uses the recording and page details to create your report and help the developer evaluate the product. It does not sell the data or use it for advertising.
 

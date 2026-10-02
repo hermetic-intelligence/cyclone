@@ -1,12 +1,6 @@
-export const TRANSCRIPTION_MODEL = "onnx-community/whisper-small.en";
-export const TRANSCRIPTION_FALLBACK_MODEL = "onnx-community/whisper-base.en";
-export const TRANSCRIPTION_MODELS = [TRANSCRIPTION_FALLBACK_MODEL, TRANSCRIPTION_MODEL,
-  "Xenova/whisper-medium.en",
-  "onnx-community/whisper-large-v3-turbo"] as const;
-export type TranscriptionModel = typeof TRANSCRIPTION_MODELS[number];
-export function isTranscriptionModel(value: unknown): value is TranscriptionModel {
-  return typeof value === "string" && TRANSCRIPTION_MODELS.some((model) => model === value);
-}
+import type { TranscriptionModel } from "./models/catalog";
+export { TRANSCRIPTION_MODEL, TRANSCRIPTION_FALLBACK_MODEL, TRANSCRIPTION_MODELS, isTranscriptionModel } from "./models/catalog";
+export type { TranscriptionModel } from "./models/catalog";
 
 export type CaptureEvent = {
   tMs: number;
@@ -40,6 +34,8 @@ export type Message =
   | { type: "toggle" }
   | { type: "get-status" }
   | { type: "set-transcription-model"; model: TranscriptionModel }
+  | { type: "get-model-cache" }
+  | { type: "remove-model-cache"; model: string | null }
   | { type: "agree-upload" }
   | { type: "page-start"; metadata: Omit<SessionMetadata, "sessionId" | "startedAt" | "endedAt">; initialCode: string }
   | { type: "page-event"; event: PageEvent }

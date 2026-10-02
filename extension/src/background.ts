@@ -1,5 +1,6 @@
 import { isTranscriptionModel, TRANSCRIPTION_MODEL } from "./shared";
 import type { ActiveSession, Message, SessionMetadata, TranscriptionModel } from "./shared";
+import { cachedModels, removeCachedModels, MODEL_CACHE_LOCK } from "./models/cache";
 
 const SESSION_KEY = "activeSession";
 const ERROR_KEY = "lastCaptureError";
@@ -303,6 +304,23 @@ async function retryUploads(): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+  if (message.type === "get-model-cache") {
+    void (async () => {
+      try { sendResponse({ ok: true, models: await cachedModels() }); }
+      catch (error) { sendResponse({ ok: false, error: String(error) }); }
+    })();
+    return true;
+  }
+  if (message.type === "remove-model-cache") {
+    void navigator.locks.request(MODEL_CACHE_LOCK, { ifAvailable: true }, async (lock) => {
+      if (!lock || await activeSession() || await pendingReport()) {
+        throw new Error("Wait until recording and transcription finish before removing model files.");
+      }
+      const removed = await removeCachedModels(message.model);
+      sendResponse({ ok: true, removed });
+    }).catch((error: unknown) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
   if (message.type === "offscreen-failed") {
     void (async () => {
       const session = await activeSession();

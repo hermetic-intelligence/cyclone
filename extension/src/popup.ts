@@ -1,3 +1,4 @@
+import { isTranscriptionModel, MODEL_DETAILS } from "./models/catalog";
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const button = document.querySelector<HTMLButtonElement>("#toggle")!;
 const errorEl = document.querySelector<HTMLParagraphElement>("#error")!;
@@ -7,14 +8,12 @@ const modelEl = document.querySelector<HTMLSelectElement>("#model")!;
 const modelHintEl = document.querySelector<HTMLParagraphElement>("#model-hint")!;
 
 function describeModel(): void {
-  modelHintEl.textContent = modelEl.value === "onnx-community/whisper-large-v3-turbo"
-    ? "Experimental: downloads about 1.5 GB and may need about 6 GB of GPU memory. Falls back to Base if it cannot load. Audio stays here."
-    : modelEl.value === "Xenova/whisper-medium.en"
-      ? "Experimental: downloads about 1 GB and may need about 5 GB of GPU memory. Falls back to Base if it cannot load. Audio stays here."
-    : modelEl.value === "onnx-community/whisper-base.en"
-      ? "Fastest local option. Lower accuracy on difficult speech. Audio stays here."
-      : "Recommended local option. First use downloads a larger model. Audio stays here.";
+  if (isTranscriptionModel(modelEl.value)) modelHintEl.textContent = MODEL_DETAILS[modelEl.value].hint;
 }
+
+document.querySelector<HTMLButtonElement>("#settings")!.addEventListener("click", () => {
+  void chrome.runtime.openOptionsPage();
+});
 
 async function refresh() {
   const response = await chrome.runtime.sendMessage({ type: "get-status" });

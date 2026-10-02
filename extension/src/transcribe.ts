@@ -1,8 +1,13 @@
 import { env, pipeline } from "@huggingface/transformers";
 import type { TranscriptSegment } from "./reports";
 import { TRANSCRIPTION_MODEL } from "./shared";
+import { MODEL_CACHE_LOCK, MODEL_CACHE_NAME } from "./models/cache";
 
 export async function transcribeLocal(audio: Blob, model = TRANSCRIPTION_MODEL): Promise<TranscriptSegment[]> {
+  return navigator.locks.request(MODEL_CACHE_LOCK, { mode: "shared" }, () => transcribeWithCache(audio, model));
+}
+
+async function transcribeWithCache(audio: Blob, model: string): Promise<TranscriptSegment[]> {
   const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown | null> } }).gpu;
   if (!gpu || !await gpu.requestAdapter()) throw new Error("WebGPU is unavailable on this device or in this Chrome profile.");
 
@@ -13,6 +18,8 @@ export async function transcribeLocal(audio: Blob, model = TRANSCRIPTION_MODEL):
     wasm: chrome.runtime.getURL("ort-wasm-simd-threaded.asyncify.wasm")
   };
   env.useWasmCache = false;
+  env.useBrowserCache = true;
+  env.cacheKey = MODEL_CACHE_NAME;
 
   const transcriber = await pipeline("automatic-speech-recognition", model, {
     device: "webgpu",

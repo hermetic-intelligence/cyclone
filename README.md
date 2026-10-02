@@ -24,6 +24,8 @@ If you are an agent asked to install or update this repository, read [the Cyclon
 
 Cyclone currently needs desktop Chrome 120 or newer, a microphone, a LeetCode problem page, and a working WebGPU adapter for transcription. The first use of a speech model needs internet access to download its weights. Report upload also needs internet access. Leave room for model files, browser cache, and recording ZIPs. We have tested the local path on an Apple silicon Mac; there is no established minimum RAM or verified Windows/Linux support. Larger transcription models remain experimental.
 
+Open **Models and storage** in the popup to change the model, inspect cached model files, or remove them. Models download on their first transcription, not when selected. Removing cached files preserves recordings and reports; using that model again downloads it again. Changes and deletion pause while recording or preparing a report.
+
 | Download | Contents | Use |
 | --- | --- | --- |
 | `Cyclone/Sessions/*.zip` | `session.json`, `events.jsonl`, `audio.webm` | Original evidence; audio stays on your computer. |
