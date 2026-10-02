@@ -1,12 +1,7 @@
-export const TRANSCRIPTION_MODEL = "onnx-community/whisper-small.en";
-export const TRANSCRIPTION_FALLBACK_MODEL = "onnx-community/whisper-base.en";
-export const TRANSCRIPTION_MODELS = [TRANSCRIPTION_FALLBACK_MODEL, TRANSCRIPTION_MODEL,
-  "Xenova/whisper-medium.en",
-  "onnx-community/whisper-large-v3-turbo"] as const;
-export type TranscriptionModel = typeof TRANSCRIPTION_MODELS[number];
-export function isTranscriptionModel(value: unknown): value is TranscriptionModel {
-  return typeof value === "string" && TRANSCRIPTION_MODELS.some((model) => model === value);
-}
+export const TRANSCRIPTION_MODEL = "gpt-transcribe";
+export const TRANSCRIPTION_MODELS = [TRANSCRIPTION_MODEL] as const;
+export type TranscriptionModel = typeof TRANSCRIPTION_MODEL;
+export function isTranscriptionModel(value: unknown): value is TranscriptionModel { return value === TRANSCRIPTION_MODEL; }
 
 export type CaptureEvent = {
   tMs: number;
@@ -38,6 +33,7 @@ export type PageEvent = Omit<CaptureEvent, "tMs">;
 
 export type Message =
   | { type: "toggle" }
+  | { type: "clear-legacy-models" }
   | { type: "get-status" }
   | { type: "set-transcription-model"; model: TranscriptionModel }
   | { type: "agree-upload" }

@@ -28,6 +28,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test:reports
+      - run: bun run test:transcription
       - run: bun run package:friends
         env:
           CYCLONE_BUILD_SHA: ${{ github.sha }}

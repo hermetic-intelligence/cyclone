@@ -1,39 +1,42 @@
-import { env, pipeline } from "@huggingface/transformers";
+import { CLOUD_KEY, CLOUD_URL, cloudSession } from "./cloud";
+import { passages, pcmWav, SAMPLE_RATE } from "./audio/passages";
 import type { TranscriptSegment } from "./reports";
-import { TRANSCRIPTION_MODEL } from "./shared";
 
-export async function transcribeLocal(audio: Blob, model = TRANSCRIPTION_MODEL): Promise<TranscriptSegment[]> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown | null> } }).gpu;
-  if (!gpu || !await gpu.requestAdapter()) throw new Error("WebGPU is unavailable on this device or in this Chrome profile.");
-
-  // ONNX Runtime uses a local WebAssembly helper even when the model runs on WebGPU.
-  // Keeping both files in the extension avoids fetching executable code remotely.
-  env.backends.onnx.wasm!.wasmPaths = {
-    mjs: chrome.runtime.getURL("ort-wasm-simd-threaded.asyncify.mjs"),
-    wasm: chrome.runtime.getURL("ort-wasm-simd-threaded.asyncify.wasm")
-  };
-  env.useWasmCache = false;
-
-  const transcriber = await pipeline("automatic-speech-recognition", model, {
-    device: "webgpu",
-    dtype: model === "onnx-community/whisper-large-v3-turbo" || model === "Xenova/whisper-medium.en"
-      ? { encoder_model: "fp16", decoder_model_merged: "q4f16" }
-      : { encoder_model: "fp32", decoder_model_merged: "q4" }
-  });
-  const url = URL.createObjectURL(audio);
-  try {
-    const result = await transcriber(url, { return_timestamps: true, chunk_length_s: 30, stride_length_s: 5,
-      ...(model === "onnx-community/whisper-large-v3-turbo" ? { language: "english", task: "transcribe" } : {}) });
-    if (!result.chunks?.length && result.text.trim()) throw new Error("The speech model returned text without timestamps.");
-    return (result.chunks ?? []).map((chunk) => {
-      const [start, end] = chunk.timestamp;
-      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
-        throw new Error("The speech model returned an invalid timestamp.");
+export async function transcribeHosted(audio: Blob, sessionId: string, title: string, onPassage: (segment: TranscriptSegment) => void): Promise<void> {
+  const consent = await chrome.runtime.sendMessage({ type: "get-status" });
+  if (!consent?.uploadConsent) throw new Error("Agree to hosted audio transcription in the Cyclone popup first.");
+  const context = new AudioContext();
+  let decoded: AudioBuffer;
+  try { decoded = await context.decodeAudioData(await audio.arrayBuffer()); }
+  finally { await context.close(); }
+  const resampler = new OfflineAudioContext(1, Math.ceil(decoded.duration * SAMPLE_RATE), SAMPLE_RATE);
+  const source = resampler.createBufferSource(); source.buffer = decoded; source.connect(resampler.destination); source.start();
+  const mono = (await resampler.startRendering()).getChannelData(0);
+  const parts = passages(mono);
+  if (!parts.length) return;
+  const session = await cloudSession();
+  for (const [index, part] of parts.entries()) {
+    const wav = pcmWav(part.samples);
+    const headers = { Authorization: `Bearer ${session.access_token}`, apikey: CLOUD_KEY,
+      "Content-Type": "audio/wav", "x-session-id": sessionId, "x-segment-index": String(index),
+      "x-recording-context": encodeURIComponent(title.slice(0, 200)) };
+    // Retries use the same audio and identity. The server never bills a repeated
+    // request twice; uncertain upstream failures remain charged to the allowance.
+    let result: { text?: string; error?: string } | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetch(`${CLOUD_URL}/functions/v1/transcribe`, { method: "POST", headers,
+          body: wav.buffer as ArrayBuffer, signal: AbortSignal.timeout(90000) });
+        result = await response.json();
+        if (response.ok) break;
+        if (response.status === 409 && attempt < 2) { await new Promise(resolve => setTimeout(resolve, 1500)); continue; }
+        throw new Error(result?.error ?? `Transcription failed (${response.status}).`);
+      } catch (error) {
+        if (error instanceof TypeError && attempt < 2) { await new Promise(resolve => setTimeout(resolve, 1500)); continue; }
+        throw error;
       }
-      return { startMs: Math.round(start * 1000), endMs: Math.round(end * 1000), text: chunk.text.trim() };
-    }).filter((segment) => segment.text);
-  } finally {
-    URL.revokeObjectURL(url);
-    await transcriber.dispose();
+    }
+    if (typeof result?.text !== "string") throw new Error("The transcription endpoint returned no text.");
+    if (result.text.trim()) onPassage({ startMs: part.startMs, endMs: part.endMs, text: result.text.trim() });
   }
 }

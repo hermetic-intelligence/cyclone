@@ -31,6 +31,3 @@ for (const size of [16, 32, 48, 128]) {
   const filename = `icon-${size}.png`;
   await copyFile(resolve(root, "icons", filename), resolve(dist, "icons", filename));
 }
-for (const filename of ["ort-wasm-simd-threaded.asyncify.mjs", "ort-wasm-simd-threaded.asyncify.wasm"]) {
-  await copyFile(resolve(root, "node_modules/onnxruntime-web/dist", filename), resolve(dist, filename));
-}
