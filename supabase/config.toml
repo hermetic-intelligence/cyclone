@@ -1,0 +1,3 @@
+[functions.transcribe]
+# Handler validates the bearer JWT with Auth getUser, including ES256 sessions.
+verify_jwt = false

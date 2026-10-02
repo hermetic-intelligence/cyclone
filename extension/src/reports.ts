@@ -22,7 +22,8 @@ function renderTrace(meta: SessionMetadata, events: CaptureEvent[], speech: Tran
     `Problem: ${meta.problemUrl || "Not recorded"}`, "",
     `Language: ${meta.language || "Not recorded"}`, "",
     `Source ZIP SHA-256: \`${sourceHash}\``, "",
-    warning ? "Speech transcription was unavailable; see the warning below." : `Speech was transcribed locally with ${model}; check the raw audio for exact words.`, "",
+    warning ? (speech.length ? "Speech transcription is incomplete; see the warning below." : "Speech transcription was unavailable; see the warning below.") : `Speech was transcribed with ${model}; check the raw audio for exact words.`, "",
+    ...(model === "gpt-transcribe" ? ["Speech times are approximate audio-passage intervals, not word timestamps. A passage can overlap several code changes; do not infer exact word-to-code ordering from its start time.", ""] : []),
     "## Problem statement", "",
     meta.problemStatement?.trim() ? markdownFence(meta.problemStatement) : "Not captured.", "",
     "## Attempt in time order", ""
@@ -50,7 +51,7 @@ function renderTrace(meta: SessionMetadata, events: CaptureEvent[], speech: Tran
       items.push({ tMs: event.tMs, order: index, text: "Code", code: event.code, language: event.language || meta.language });
     }
   });
-  speech.forEach((segment, index) => items.push({ tMs: segment.startMs, order: events.length + index, text: `You said: ${segment.text}` }));
+  speech.forEach((segment, index) => items.push({ tMs: segment.startMs, order: events.length + index, text: model === "gpt-transcribe" ? `Speech through ${fmtTime(segment.endMs)}: ${segment.text}` : `You said: ${segment.text}` }));
   items.sort((a, b) => a.tMs - b.tMs || a.order - b.order);
   if (!items.length) out.push("No speech, code, or Run/Submit actions were recorded.", "");
   for (const item of items) {
@@ -69,7 +70,7 @@ export function createReports(meta: SessionMetadata, events: CaptureEvent[], spe
     source: { path: sourcePath, sha256: sourceHash },
     events: sortedEvents,
     transcript: sortedSpeech,
-    transcription: { requestedModel, model, device: "webgpu", status: warning ? "failed" : "complete", fallbackReason },
+    transcription: { requestedModel, model, device: model === "gpt-transcribe" ? "hosted" : "webgpu", ...(model === "gpt-transcribe" ? { timing: "audio-passage-intervals" } : {}), status: warning ? (speech.length ? "partial" : "failed") : "complete", fallbackReason },
     transcriptionWarning: warning
   };
   return [

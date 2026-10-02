@@ -1,13 +1,9 @@
 import type { CaptureEvent, Message, SessionMetadata } from "./shared";
 import { createReports } from "./reports";
-import { transcribeLocal } from "./transcribe";
-import { createClient } from "@supabase/supabase-js";
-import { TRANSCRIPTION_FALLBACK_MODEL } from "./shared";
+import { transcribeHosted } from "./transcribe";
+import { supabase } from "./cloud";
 import type { TranscriptionModel } from "./shared";
 
-const supabase = createClient("https://dalyamgpwkllgwwfywpq.supabase.co", "sb_publishable_15b21h1aMNKJohsGZzhY-w_SKHTE2v_", {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
-});
 type PendingUpload = { sessionId: string; blob: Blob };
 
 type StoredSession = { sessionId: string; metadata: SessionMetadata; events: CaptureEvent[]; sourceHash?: string };
@@ -269,38 +265,14 @@ async function processReport(sessionId: string, sourceHash: string, sourcePath: 
   const audioChunks = chunks.filter((chunk) => chunk.sessionId === sessionId).sort((a, b) => a.chunkIndex - b.chunkIndex);
   if (!audioChunks.length) throw new Error("The saved microphone recording is unavailable for report creation.");
   const audio = new Blob(audioChunks.map((chunk) => chunk.blob), { type: "audio/webm" });
-  let transcript: Awaited<ReturnType<typeof transcribeLocal>> = [];
-  let model: string = requestedModel;
-  let fallbackReason: string | null = null;
+  const transcript: import("./reports").TranscriptSegment[] = [];
+  const model = "gpt-transcribe";
+  const fallbackReason = null;
   let warning: string | null = null;
-  let timer: number | undefined;
   try {
-    transcript = await Promise.race([
-      transcribeLocal(audio, requestedModel),
-      new Promise<never>((_resolve, reject) => {
-        const minutes = requestedModel === "onnx-community/whisper-large-v3-turbo" || requestedModel === "Xenova/whisper-medium.en" ? 10 : 6;
-        timer = self.setTimeout(() => reject(new Error(`Local transcription took longer than ${minutes} minutes.`)), minutes * 60000);
-      })
-    ]);
+    await transcribeHosted(audio, sessionId, saved.metadata.title, segment => { transcript.push(segment); });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    if (/longer than \d+ minutes/.test(reason)) {
-      warning = `Local transcription failed: ${reason}. The original audio remains in the raw session ZIP.`;
-    } else {
-      if (requestedModel === TRANSCRIPTION_FALLBACK_MODEL) {
-        warning = `Local transcription failed: ${reason}. The original audio remains in the raw session ZIP.`;
-      } else {
-        fallbackReason = `${requestedModel} failed: ${reason}`;
-        model = TRANSCRIPTION_FALLBACK_MODEL;
-        try {
-          transcript = await transcribeLocal(audio, model);
-        } catch (fallbackError) {
-          warning = `Local transcription failed with both models: ${fallbackReason}; ${model} failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}. The original audio remains in the raw session ZIP.`;
-        }
-      }
-    }
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
+    warning = `Hosted transcription ${transcript.length ? "was incomplete" : "failed"}: ${error instanceof Error ? error.message : String(error)}. The original audio remains in the raw session ZIP.`;
   }
   const report = makeZip(createReports(saved.metadata, saved.events, transcript, warning, sourceHash, sourcePath, model, fallbackReason, requestedModel));
   await request(db.transaction("uploads", "readwrite").objectStore("uploads").put({ sessionId, blob: report } satisfies PendingUpload));

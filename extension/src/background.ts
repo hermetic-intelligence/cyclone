@@ -8,7 +8,7 @@ const OFFSCREEN_URL = "offscreen.html";
 const AUTO_STOP_ALARM_PREFIX = "cyclone-submit-";
 const AUTO_STOP_DELAY_MINUTES = 0.5;
 const UPLOAD_ALARM = "cyclone-upload-retry";
-const UPLOAD_CONSENT_KEY = "reportUploadConsent";
+const UPLOAD_CONSENT_KEY = "hostedTranscriptionConsentV1";
 const UPLOAD_STATUS_KEY = "reportUploadStatus";
 const TRANSCRIPTION_MODEL_KEY = "transcriptionModel";
 
@@ -174,7 +174,7 @@ async function ensureOffscreen(): Promise<void> {
 
 async function begin(tab: chrome.tabs.Tab, openPermissionTab = true): Promise<void> {
   const consent = await chrome.storage.local.get(UPLOAD_CONSENT_KEY);
-  if (consent[UPLOAD_CONSENT_KEY] !== true) throw new Error("Open Cyclone and agree to private report upload before recording.");
+  if (consent[UPLOAD_CONSENT_KEY] !== true) throw new Error("Open Cyclone and agree to hosted audio transcription and private report upload before recording.");
   if (await pendingReport()) throw new Error("Cyclone is still preparing the previous session report. Try again when the ASR badge clears.");
   if (!tab.id) {
     throw new Error("Open a LeetCode problem page before recording.");
@@ -312,6 +312,19 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
       await showError(new Error(message.reason));
     })();
     return false;
+  }
+  if (message.type === "clear-legacy-models") {
+    void (async () => {
+      if (await activeSession() || await pendingReport()) throw new Error("Wait for the current attempt to finish.");
+      if (!await caches.has("transformers-cache")) { sendResponse({ ok: true, removed: 0 }); return; }
+      const cache = await caches.open("transformers-cache"); let removed = 0;
+      for (const key of await cache.keys()) {
+        const url = new URL(key.url);
+        if (url.origin === "https://huggingface.co" && /^\/[^/]+\/[^/]+\/resolve\//.test(url.pathname) && await cache.delete(key)) removed++;
+      }
+      sendResponse({ ok: true, removed });
+    })().catch((error: unknown) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
   }
   if (message.type === "toggle") {
     void toggle().then(() => sendResponse({ ok: true })).catch((error: unknown) => {

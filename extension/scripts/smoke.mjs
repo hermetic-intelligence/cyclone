@@ -1,17 +1,37 @@
 import { chromium } from "playwright";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, cp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import assert from "node:assert/strict";
 
-const extension = resolve(import.meta.dirname, "../dist");
+const builtExtension = resolve(import.meta.dirname, "../dist");
 const realMic = process.env.CYCLONE_REAL_MIC === "1";
 const liveUpload = process.env.CYCLONE_TEST_UPLOAD === "1";
 const profile = await mkdtemp(resolve(tmpdir(), "cyclone-smoke-"));
 let context;
 
 try {
+  const extension = resolve(profile, "test-extension");
+  await cp(builtExtension, extension, { recursive: true });
+  if (!liveUpload) {
+    // Offscreen documents are not normal Playwright pages. Instrument a temporary
+    // COPY only; never put test mocks into the distributable extension/dist.
+    const payload = Buffer.from(JSON.stringify({ sub: "00000000-0000-0000-0000-000000000001", exp: Math.floor(Date.now() / 1000) + 3600, role: "authenticated", aud: "authenticated" })).toString("base64url");
+    const session = { access_token: `eyJhbGciOiJIUzI1NiJ9.${payload}.c3ludGhldGlj`, refresh_token: "synthetic", token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: "00000000-0000-0000-0000-000000000001", aud: "authenticated" } };
+    const prefix = `localStorage.setItem("sb-dalyamgpwkllgwwfywpq-auth-token", ${JSON.stringify(JSON.stringify(session))});
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  if (String(input).endsWith("/functions/v1/transcribe")) {
+    const bytes = new Uint8Array(init.body); const view = new DataView(bytes.buffer);
+    if (new TextDecoder().decode(bytes.slice(0,4)) !== "RIFF" || view.getUint32(24,true) !== 16000 || bytes.length > 640044) throw new Error("Bad passage WAV");
+    return localStorage.getItem("smokeExhausted") ? Response.json({error:"Experiment allowance exhausted"},{status:402}) : Response.json({text:"I can use a lookup table.",model:"gpt-transcribe"});
+  }
+  return originalFetch(input, init);
+};\n`;
+    const offscreen = resolve(extension, "offscreen.js");
+    await writeFile(offscreen, prefix + await readFile(offscreen, "utf8"));
+  }
   context = await chromium.launchPersistentContext(profile, {
     channel: "chromium",
     headless: true,
@@ -28,6 +48,15 @@ try {
   const extensionId = new URL(worker.url()).host;
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await popup.evaluate(async () => {
+    const cache = await caches.open("transformers-cache");
+    await cache.put("https://huggingface.co/onnx-community/whisper-small.en/resolve/main/config.json", new Response("old model"));
+    await cache.put("https://example.com/keep", new Response("unrelated"));
+  });
+  await popup.getByRole("button", { name: "Remove old model downloads" }).click();
+  await popup.getByRole("button", { name: "Removed 1 old model files" }).waitFor();
+  const keptCache = await popup.evaluate(async () => (await (await caches.open("transformers-cache")).keys()).map(key => key.url));
+  assert.deepEqual(keptCache, ["https://example.com/keep"]);
   const page = await context.newPage();
   await page.route("https://leetcode.com/problems/cyclone-smoke/**", async (route) => {
     await route.fulfill({
@@ -39,17 +68,20 @@ try {
   await context.setOffline(true);
   await page.bringToFront();
 
+  const priorConsent = await popup.evaluate(async () => {
+    await chrome.storage.local.set({ reportUploadConsent: true });
+    return chrome.runtime.sendMessage({ type: "get-status" });
+  });
+  assert.equal(priorConsent.uploadConsent, false, "old local-only consent must not authorize audio uploads");
   const consent = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "agree-upload" }));
   assert.equal(consent?.ok, true);
-  const requestedModel = liveUpload ? "onnx-community/whisper-small.en" : "onnx-community/whisper-large-v3-turbo";
-  await popup.locator("#model").selectOption(requestedModel);
-  await popup.waitForFunction(async (model) => (await chrome.storage.local.get("transcriptionModel")).transcriptionModel === model,
-    requestedModel);
+  const requestedModel = "gpt-transcribe";
   const start = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "toggle" }));
   const startReturnedAtMs = Date.now();
   assert.equal(start?.ok, true, `start failed: ${JSON.stringify(start)}`);
   await page.locator("#cyclone-capture-status").getByText("Cyclone recording").waitFor();
   assert.equal(await worker.evaluate(() => chrome.action.getBadgeText({})), "REC");
+  assert.equal((await popup.evaluate(() => chrome.runtime.sendMessage({ type: "clear-legacy-models" }))).ok, false);
 
   await page.locator('textarea[aria-label="Code editor"]').fill("print(2)");
   await popup.bringToFront();
@@ -71,8 +103,10 @@ try {
   assert.equal(analysis.source.sha256, hashFile(archive));
   assert.match(analysis.source.path, /^Cyclone\/Sessions\/cyclone-/);
   if (!liveUpload) {
-    assert.equal(analysis.transcription.status, "failed");
-    assert.match(analysis.transcriptionWarning, /Local transcription failed/);
+    assert.equal(analysis.transcription.status, "complete", analysis.transcriptionWarning);
+    assert.equal(analysis.transcription.timing, "audio-passage-intervals");
+    assert.match(agent, /I can use a lookup table/);
+    assert.match(agent, /not word timestamps/);
   }
   await page.waitForTimeout(1000);
   const completed = await popup.evaluate(() => chrome.downloads.search({ state: "complete" }));
@@ -96,9 +130,11 @@ try {
   const audio = execFileSync("unzip", ["-p", archive, "audio.webm"]);
   assert.ok(audio.length > 0, "audio.webm is empty");
   assert.equal(audio.subarray(0, 4).toString("hex"), "1a45dfa3", "audio.webm is not WebM");
-  const codec = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", "pipe:0"], { input: audio, encoding: "utf8" }).trim();
+  const audioPath = resolve(profile, "audio.webm");
+  await writeFile(audioPath, audio);
+  const codec = execFileSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1", audioPath], { encoding: "utf8" }).trim();
   assert.equal(codec, "opus", "audio.webm is not decodable Opus audio");
-  const packetTimes = execFileSync("ffprobe", ["-v", "error", "-show_entries", "packet=pts_time", "-of", "csv=p=0", "pipe:0"], { input: audio, encoding: "utf8" }).trim().split("\n").map(Number);
+  const packetTimes = execFileSync("ffprobe", ["-v", "error", "-show_entries", "packet=pts_time", "-of", "csv=p=0", audioPath], { encoding: "utf8" }).trim().split("\n").map(Number);
   assert.ok(Math.max(...packetTimes) >= 6, `audio covers only ${Math.max(...packetTimes)} seconds`);
   const session = JSON.parse(execFileSync("unzip", ["-p", archive, "session.json"], { encoding: "utf8" }));
   const events = execFileSync("unzip", ["-p", archive, "events.jsonl"], { encoding: "utf8" });
@@ -110,9 +146,10 @@ try {
   assert.match(events, /"type":"submit"/);
   assert.match(events, /"result":"Accepted"/);
 
+  if (!liveUpload) await popup.evaluate(() => localStorage.setItem("smokeExhausted", "true"));
   // A manual stop while a Submit result is pending must cancel its timeout.
   const changedModel = await popup.evaluate(() => chrome.runtime.sendMessage({
-    type: "set-transcription-model", model: "onnx-community/whisper-base.en"
+    type: "set-transcription-model", model: "gpt-transcribe"
   }));
   assert.equal(changedModel?.ok, true);
   await page.bringToFront();
@@ -131,6 +168,13 @@ try {
   const stop = await popup.evaluate(() => chrome.runtime.sendMessage({ type: "toggle" }));
   assert.equal(stop?.ok, true, `stop failed: ${JSON.stringify(stop)}`);
   await waitForCompletedDownloads(popup, page, 4);
+  if (!liveUpload) {
+    const exports = await popup.evaluate(() => chrome.downloads.search({ state: "complete" }));
+    const latestReport = exports.filter(item => zipEntries(item.filename).includes("timeline.json")).sort((a, b) => b.id - a.id)[0];
+    const failed = JSON.parse(execFileSync("unzip", ["-p", latestReport.filename, "timeline.json"], { encoding: "utf8" }));
+    assert.equal(failed.transcription.status, "failed");
+    assert.match(failed.transcriptionWarning, /Experiment allowance exhausted/);
+  }
   const alarmsAfterManualStop = await worker.evaluate(() => chrome.alarms.getAll());
   assert.ok(!alarmsAfterManualStop.some(({ name }) => name === alarm), "manual stop should cancel the pending Submit alarm");
   await page.locator("[data-e2e-locator='submission-result']").evaluate((element) => { element.textContent = "Wrong Answer"; });
@@ -156,7 +200,7 @@ try {
     const removed = await client.storage.from("reports").remove(stored.map((file) => `${auth.user.id}/${file.name}`));
     assert.ifError(removed.error);
   }
-  console.log(`${realMic ? "Real mic" : "Fake mic"} capture smoke passed: decodable Opus, separate local report with raw ZIP hash, ASR fallback, Submit/result and manual stop without duplicate exports.`);
+  console.log(`${realMic ? "Real mic" : "Fake mic"} capture smoke passed: decodable Opus, separate local report with raw ZIP hash, mocked hosted ASR success and allowance exhaustion, old consent reset, safe model cleanup, Submit/result and manual stop without duplicate exports.`);
 } finally {
   await context?.close();
   await rm(profile, { recursive: true, force: true });

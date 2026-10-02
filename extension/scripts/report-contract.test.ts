@@ -25,8 +25,8 @@ test("a report has one readable interwoven trace and one complete record", () =>
   expect(timeline.source).toEqual({ path: "cyclone-s1.zip", sha256: "abc123" });
   const report = decode("README.md");
   expect(report).toContain("Return two indices.");
-  expect(report.indexOf("### 00:00 Code")).toBeLessThan(report.indexOf("### 00:01 You said"));
-  expect(report.indexOf("### 00:01 You said")).toBeLessThan(report.indexOf("### 00:02 Code"));
+  expect(report.indexOf("### 00:00 Code")).toBeLessThan(report.indexOf("### 00:01 Speech"));
+  expect(report.indexOf("### 00:01 Speech")).toBeLessThan(report.indexOf("### 00:02 Code"));
   expect(report.indexOf("### 00:16 Code")).toBeLessThan(report.indexOf("### 00:16 Run: Wrong Answer"));
 });
 
